@@ -1,0 +1,9 @@
+{
+  "aspect": "9:16",
+  "out": "edit_30s.mp4",
+  "cuts": [
+    {"source": "interview.mov", "start": 41.2, "end": 44.0},
+    {"source": "interview.mov", "start": 72.5, "end": 76.1},
+    {"source": "interview.mov", "start": 123.0, "end": 127.4}
+  ]
+}
