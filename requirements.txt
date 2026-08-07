@@ -1,0 +1,19 @@
+# Core (required)
+faster-whisper>=1.0.0      # transcription with word timestamps
+numpy>=1.24               # audio-energy analysis
+pyyaml>=6.0               # trend library
+
+# Recommended
+anthropic>=0.39           # Claude-powered hook detection, captions copy, self-audit
+scenedetect>=0.6.4        # robust scene-cut detection (falls back to ffmpeg filter)
+
+# Optional (enable specific features)
+yt-dlp>=2024.1            # pull footage from YouTube/TikTok/Instagram/X/etc URLs
+gdown>=5.1               # Google Drive share-link downloads
+librosa>=0.10            # --beat-sync (snap cuts to music beats)
+requests>=2.31           # --refresh-trends from a URL
+
+# System dependency (NOT pip): ffmpeg + ffprobe must be on PATH.
+#   macOS:  brew install ffmpeg
+#   Debian: sudo apt install ffmpeg
+# Google Drive folders/remotes use rclone (brew install rclone && rclone config).
