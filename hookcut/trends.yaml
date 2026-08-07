@@ -1,0 +1,76 @@
+# HookCut trend library — editable knowledge base of short-form formats.
+# Edit freely. `hookcut --refresh-trends <url-or-file>` can append/refresh.
+# Each format is a repeatable structure the planner/auditor can reason about.
+
+version: 2026.1
+updated: "2026-08-06"
+
+principles:
+  - The first 1.5 seconds decide retention. Open on the single most surprising
+    or high-stakes line/frame — never on setup or a slate.
+  - Show the payoff early, then earn it back (open loop). Don't bury the lede.
+  - Cut on motion or on the beat. Dead air > 0.4s kills pace on <60s edits.
+  - Captions are non-optional on mute-first feeds. Big, high-contrast, word-timed.
+  - One idea per video. If it needs two hooks, it's two videos.
+  - End on a button: a punchline, a loop back to the hook, or an explicit CTA.
+
+hook_archetypes:
+  - name: contrarian
+    template: "Everyone tells you {common_belief}. They're wrong."
+  - name: stakes
+    template: "I {big_action} so you don't have to."
+  - name: numbered
+    template: "{N} {things} that {payoff} in {timeframe}."
+  - name: curiosity_gap
+    template: "The real reason {surprising_subject} is not what you think."
+  - name: callout
+    template: "If you {audience_behavior}, watch this."
+  - name: before_after
+    template: "This went from {bad_state} to {good_state}. Here's how."
+  - name: mistake
+    template: "The #1 mistake people make with {topic}."
+
+formats:
+  - id: talking_fast_cut
+    label: "Talking-head fast-cut"
+    fits: [talking, mixed]
+    structure: [hook_line, jump_cut_body, payoff, cta_button]
+    pacing: "Remove pauses/filler. Avg on-screen clip 1.5-3s. Zoom-punch on key words."
+    caption: karaoke
+    lengths: [15, 30, 45, 60]
+
+  - id: listicle
+    label: "Numbered listicle"
+    fits: [talking, mixed]
+    structure: [numbered_hook, point_1, point_2, point_3, recap_cta]
+    pacing: "One point per beat. On-screen counter. Tighten between points."
+    caption: karaoke
+    lengths: [30, 45, 60]
+
+  - id: broll_montage
+    label: "B-roll beat montage"
+    fits: [broll, gameplay, mixed]
+    structure: [cold_open_peak, build, drop_montage, tag]
+    pacing: "Cut on the beat. Escalate energy. Save the best frame for the drop."
+    caption: block
+    lengths: [15, 30]
+
+  - id: gameplay_highlight
+    label: "Gameplay/screen highlight"
+    fits: [gameplay, mixed]
+    structure: [action_peak_cold_open, context, second_peak, reaction_button]
+    pacing: "Open on the loudest/most intense peak. Speed-ramp into it."
+    caption: block
+    lengths: [15, 30, 45]
+
+  - id: story_extended
+    label: "Extended story/essay"
+    fits: [talking, mixed]
+    structure: [hook, setup, escalation, turn, payoff, reflection_cta]
+    pacing: "Earn the length. Re-hook every ~20s with a mini open loop."
+    caption: karaoke
+    lengths: [extended]
+
+hashtags_seed:
+  general: ["#fyp", "#foryou", "#viral", "#shorts", "#reels"]
+  # topical buckets are filled in by the LLM per-video when a key is present.
