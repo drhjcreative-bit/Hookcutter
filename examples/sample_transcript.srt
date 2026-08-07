@@ -1,0 +1,11 @@
+1
+00:00:41,200 --> 00:00:44,000
+You're closing wrong
+
+2
+00:01:12,500 --> 00:01:16,100
+The close happens three questions earlier
+
+3
+00:02:03,000 --> 00:02:07,400
+Ask what happens if they do nothing
