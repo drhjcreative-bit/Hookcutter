@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+hookcut_out/
+*.hookcut.json
+_ingest/
+.DS_Store
+*.egg-info/
+build/
+dist/
