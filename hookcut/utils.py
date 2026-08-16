@@ -9,6 +9,8 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from . import theme
+
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".flv", ".ts", ".mpg", ".mpeg"}
 
 _VERBOSE = False
@@ -20,14 +22,14 @@ def set_verbose(v: bool) -> None:
 
 
 def log(msg: str, *, level: str = "info") -> None:
-    tag = {"info": "•", "ok": "✓", "warn": "!", "err": "✗", "step": "▶"}.get(level, "•")
-    stream = sys.stderr if level in ("warn", "err") else sys.stdout
+    tag = theme.STATUS_GLYPHS.get(level, theme.STATUS_DEFAULT)
+    stream = sys.stderr if level in theme.STDERR_LEVELS else sys.stdout
     print(f"{tag} {msg}", file=stream, flush=True)
 
 
 def debug(msg: str) -> None:
     if _VERBOSE:
-        print(f"  · {msg}", file=sys.stderr, flush=True)
+        print(f"{theme.DEBUG_PREFIX}{msg}", file=sys.stderr, flush=True)
 
 
 def which(name: str) -> Optional[str]:

@@ -19,6 +19,7 @@ from typing import List
 from .segments import CutPlan
 from .config import ASPECTS
 from .captions import build_ass
+from .theme import PAD_BACKGROUND
 from .utils import require, run, log, debug, ensure_dir, slugify, hhmmss
 
 
@@ -30,7 +31,7 @@ def _scale_crop_filter(tw: int, th: int) -> str:
 
 def _pad_filter(tw: int, th: int) -> str:
     return (f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-            f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+            f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:{PAD_BACKGROUND},setsar=1")
 
 
 def _clip_filter(aspect: str) -> str:
@@ -138,5 +139,5 @@ def render_plan(plan: CutPlan, transcripts: dict, settings) -> str:
     else:
         os.replace(concat_out, final)
 
-    log(f"✓ {plan.duration_key}s → {final}", level="ok")
+    log(f"{plan.duration_key}s → {final}", level="ok")
     return final

@@ -6,6 +6,7 @@ import sys
 
 from . import __version__
 from .config import Settings, DURATION_PRESETS, ASPECTS, FOOTAGE_MODES
+from .theme import PALETTES, DEFAULT_THEME
 from .utils import log
 
 
@@ -51,9 +52,14 @@ def build_parser() -> argparse.ArgumentParser:
     g = p.add_argument_group("captions & music")
     g.add_argument("--no-captions", action="store_true")
     g.add_argument("--caption-style", default="karaoke", choices=["karaoke", "block", "none"])
+    g.add_argument("--theme", default=DEFAULT_THEME, choices=list(PALETTES),
+                   help=f"caption color theme (default {DEFAULT_THEME})")
     g.add_argument("--font", default="", help="path to a .ttf for captions")
-    g.add_argument("--caption-size", type=int, default=64)
-    g.add_argument("--highlight-color", default="#F5D90A")
+    g.add_argument("--caption-size", type=int, default=0,
+                   help="caption font size in px (default: scaled from the theme)")
+    g.add_argument("--highlight-color", default="",
+                   help="override the theme's karaoke accent "
+                        f"(default theme uses {PALETTES[DEFAULT_THEME].highlight})")
     g.add_argument("--music", default="", help="path to a music bed")
     g.add_argument("--beat-sync", action="store_true", help="snap cuts to music beats (needs librosa)")
 
@@ -77,7 +83,8 @@ def settings_from_args(a: argparse.Namespace) -> Settings:
         inputs=a.inputs, out_dir=a.out_dir, durations=a.durations, aspect=a.aspect,
         mode=a.mode, whisper_model=a.whisper_model, language=a.language, device=a.device,
         use_llm=not a.no_llm, model=a.model, max_hooks=a.max_hooks,
-        captions=not a.no_captions, caption_style=a.caption_style, font=a.font,
+        captions=not a.no_captions, caption_style=a.caption_style,
+        theme=a.theme, font=a.font,
         caption_size=a.caption_size, highlight_color=a.highlight_color,
         music=a.music, beat_sync=a.beat_sync,
         audit=not a.no_audit, audit_threshold=a.audit_threshold,
