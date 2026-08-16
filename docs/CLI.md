@@ -21,9 +21,10 @@ One or more files, folders, URLs, or `gdrive:`/`icloud:` specs (see README).
 | `--no-llm` | off | Heuristics only, no API calls |
 | `--model` | `claude-sonnet-4-5` | Claude model id |
 | `--caption-style` | `karaoke` | `karaoke` \| `block` \| `none` |
+| `--theme` | `default` | Caption color theme: `default` \| `mono` |
 | `--font` | auto | Path to a `.ttf` for captions |
-| `--caption-size` | `64` | Caption font size |
-| `--highlight-color` | `#F5D90A` | Karaoke highlight color |
+| `--caption-size` | auto | Caption font size in px; default scales from the theme |
+| `--highlight-color` | theme | Override the theme's karaoke accent (e.g. `#F5D90A`) |
 | `--music` | — | Path to a music bed |
 | `--beat-sync` | off | Snap cuts to music beats (needs librosa) |
 | `--no-audit` | off | Skip the self-audit loop |
@@ -59,3 +60,27 @@ Transcripts are cached as `<video>.hookcut.json` for instant re-runs.
 | Trend refresh from URL | `requests` |
 
 Install everything: `pip install -e ".[all]"`.
+
+## Caption theme
+
+Every visual value HookCut burns into a video — and every glyph it prints to
+the terminal — is a token in [`hookcut/theme.py`](../hookcut/theme.py). Nothing
+visual is authored anywhere else.
+
+| Theme | Accent | Use |
+|---|---|---|
+| `default` | `#F5D90A` | The shipped look: yellow accent resolving to white |
+| `mono` | `#9A9A9A` | No accent hue, for footage the yellow fights with |
+
+Under karaoke timing a word is drawn in the **accent** until its moment
+arrives, then switches to the **fill** — so the accent is the *pending* color
+and white is the *spoken* one.
+
+Sizes and gutters are stored as ratios of the canvas, not pixels: type and side
+gutters scale off the short edge, the bottom safe area off height. All four
+`--aspect` presets are 1080 on the short edge, so they render at the shipped
+64px / 60px; a 4K canvas gets 128px / 120px instead of hairline text.
+
+Add a theme by adding one `CaptionPalette` to `PALETTES` — `--theme` picks up
+the new key automatically. `--highlight-color` overrides only the accent and
+leaves the rest of the theme intact.

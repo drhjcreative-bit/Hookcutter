@@ -89,7 +89,8 @@ def run(settings: Settings) -> dict:
     trends = TR.Trends(settings)
     mode = settings.mode if settings.mode != "auto" else ("talking" if dialogue_any else "broll")
 
-    manifest = {"sources": files, "aspect": settings.aspect, "mode": mode, "edits": []}
+    manifest = {"sources": files, "aspect": settings.aspect, "mode": mode,
+                "theme": settings.theme, "edits": []}
     log(f"packaging {len(settings.durations)} length(s): {', '.join(settings.durations)}", level="step")
 
     for dk in settings.durations:

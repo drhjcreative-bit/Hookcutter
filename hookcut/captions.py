@@ -12,17 +12,10 @@ from __future__ import annotations
 import os
 from typing import List, Tuple
 
+from . import theme as TH
 from .transcribe import Transcript, Word
 from .segments import CutPlan
 from .utils import debug
-
-
-def _hex_to_ass(color: str, alpha: str = "00") -> str:
-    color = color.lstrip("#")
-    if len(color) != 6:
-        color = "F5D90A"
-    r, g, b = color[0:2], color[2:4], color[4:6]
-    return f"&H{alpha}{b}{g}{r}".upper()
 
 
 def _ass_time(t: float) -> str:
@@ -58,13 +51,14 @@ def _collect_words(plan: CutPlan, transcripts: dict) -> List[Tuple[float, float,
     return out
 
 
-def _group_lines(words: List[Tuple[float, float, str]], max_chars: int = 22):
-    """Group words into short caption lines (2-4 words) for punchy pacing."""
+def _group_lines(words: List[Tuple[float, float, str]], layout: TH.CaptionLayout):
+    """Group words into short caption lines for punchy pacing (see layout tokens)."""
     lines = []
     cur = []
     cur_len = 0
     for ws, we, tok in words:
-        if cur and (cur_len + len(tok) + 1 > max_chars or len(cur) >= 4):
+        if cur and (cur_len + len(tok) + 1 > layout.max_chars
+                    or len(cur) >= layout.max_words):
             lines.append(cur)
             cur, cur_len = [], 0
         cur.append((ws, we, tok))
@@ -84,11 +78,16 @@ def build_ass(plan: CutPlan, transcripts: dict, settings, res=(1080, 1920)) -> s
         return ""
 
     W, H = res
-    hi = _hex_to_ass(settings.highlight_color)
-    white = _hex_to_ass("FFFFFF")
-    size = settings.caption_size
-    fontname = os.path.basename(settings.font).rsplit(".", 1)[0] if settings.font else "Arial"
-    margin_v = int(H * 0.16)
+    th = TH.resolve(settings)
+    pal, layout = th.palette, th.layout
+    m = th.metrics(W, H, size_px=getattr(settings, "caption_size", 0))
+
+    fill = TH.to_ass_color(pal.fill)
+    highlight = TH.to_ass_color(pal.highlight)
+    outline = TH.to_ass_color(pal.outline)
+    shadow = TH.to_ass_color(pal.shadow, alpha=pal.shadow_alpha)
+    bold = -1 if layout.bold else 0
+    fontname = os.path.basename(th.font).rsplit(".", 1)[0] if th.font else "Arial"
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -99,13 +98,14 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Base,{fontname},{size},{white},{hi},&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,60,60,{margin_v},1
+Style: Base,{fontname},{m.size},{fill},{highlight},{outline},{shadow},{bold},0,0,0,100,100,0,0,1,{layout.outline_w},{layout.shadow_w},{layout.align},{m.gutter},{m.gutter},{m.safe_bottom},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = []
-    lines = _group_lines(words)
+    lines = _group_lines(words, layout)
+    cased = (lambda s: s.upper()) if layout.uppercase else (lambda s: s)
     for line in lines:
         l_start = line[0][0]
         l_end = line[-1][1]
@@ -113,10 +113,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             parts = []
             for ws, we, tok in line:
                 cs = max(1, int(round((we - ws) * 100)))
-                parts.append(f"{{\\k{cs}}}{tok.upper()} ")
+                parts.append(f"{{\\k{cs}}}{cased(tok)} ")
             text = "".join(parts).strip()
         else:
-            text = " ".join(tok.upper() for _ws, _we, tok in line)
+            text = " ".join(cased(tok) for _ws, _we, tok in line)
         events.append(
             f"Dialogue: 0,{_ass_time(l_start)},{_ass_time(l_end)},Base,,0,0,0,,{text}"
         )

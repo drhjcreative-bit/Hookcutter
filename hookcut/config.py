@@ -49,12 +49,13 @@ class Settings:
     max_hooks: int = 12
     min_clip: float = 0.6                                # min sub-clip length (s)
 
-    # captions
+    # captions — visual values live in theme.py; these are overrides.
     captions: bool = True
     caption_style: str = "karaoke"                       # karaoke/block/none
+    theme: str = "default"                               # theme.PALETTES key
     font: str = ""                                       # path to .ttf; "" = auto
-    caption_size: int = 64
-    highlight_color: str = "#F5D90A"
+    caption_size: int = 0                                # 0 = scale from theme
+    highlight_color: str = ""                            # "" = theme accent
 
     # music / rhythm
     music: str = ""                                      # path to a music bed
