@@ -166,3 +166,29 @@ Honest limits (Zoom's web SDK, not Halo):
 - The SDK version is pinned in `js/zoom.js` (`DEFAULT_VERSION`); Zoom retires
   old versions quarterly, so bump it if joins start failing with a version
   error (override without a deploy via `window.HALO_ZOOM_SDK_VERSION`).
+
+### Troubleshooting the Zoom tab
+
+**"I added the keys but the Zoom tab never appears."** Open `/health` on your
+deployed URL (e.g. `https://your-repl.replit.dev/health`). It reports whether
+the server actually sees the credentials, without printing them:
+
+```json
+{ "zoom": { "configured": true, "sdkKeyLength": 21, "sdkSecretLength": 32,
+            "likelySwapped": false } }
+```
+
+- `configured: false` → the env vars aren't reaching the process. Re-check the
+  names (`ZOOM_SDK_KEY`, `ZOOM_SDK_SECRET`) and **restart** the server; the
+  startup log also prints whether Zoom interop is enabled.
+- `likelySwapped: true` → the Client ID and Client Secret are the wrong way
+  round. Zoom Client IDs are ~22 chars, Client Secrets are 32.
+- `configured: true` but still no tab → a stale service worker is serving an old
+  capability response. Versions before `halo-v3` cached `/zoom-config`; the
+  current worker never caches it. Hard-reload once (iOS Safari: close the tab,
+  or Settings → Safari → Clear History) to pick up the new worker.
+
+Join failures now surface Zoom's own error text and code in the toast (and the
+full object in the browser console), e.g. *"Signature is invalid [3712]"* —
+that's a key/secret mismatch — or a version error, which means bumping
+`DEFAULT_VERSION` in `js/zoom.js`.

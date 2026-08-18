@@ -494,10 +494,11 @@ async function joinMeetingPrompt() {
       try {
         await joinZoomMeeting({ meetingNumber: mn, passcode, userName });
       } catch (e) {
-        const msg = e && e.reason ? e.reason
-          : e && e.message === 'zoom-not-configured' ? 'Zoom keys not configured on the server'
-          : 'Could not join the Zoom meeting';
-        toast(msg, 3500);
+        const msg = e && e.message === 'zoom-not-configured'
+          ? 'Zoom keys not configured on the server — see /health'
+          : `Zoom: ${(e && (e.message || e.reason)) || 'could not join'}`;
+        toast(msg, 6000);
+        console.error('[Halo] Zoom join failed:', e && e.raw ? e.raw : e);
       }
     });
     zoomPane.appendChild(zoomBtn);

@@ -41,7 +41,7 @@ function loadSdk(version) {
 
 export async function getZoomConfig() {
   try {
-    const r = await fetch('/zoom-config');
+    const r = await fetch('/zoom-config', { cache: 'no-store' });
     return r.ok ? await r.json() : { enabled: false };
   } catch {
     return { enabled: false };
@@ -76,7 +76,7 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ meetingNumber, role: 0 }),
   });
-  if (!res.ok) throw new Error('signature-failed');
+  if (!res.ok) throw new Error(`signature-failed (${res.status})`);
   const { signature, sdkKey } = await res.json();
 
   // Full-screen host with a Halo top bar so you can always get out.
@@ -111,7 +111,14 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
     });
   } catch (err) {
     leaveZoom();
-    throw err;
+    // Zoom rejects with {type, reason, errorCode}; keep those so the UI can
+    // show what actually went wrong instead of a generic failure.
+    const detail = err && (err.reason || err.message) ? (err.reason || err.message) : 'unknown error';
+    const code = err && err.errorCode ? ` [${err.errorCode}]` : '';
+    const wrapped = new Error(`${detail}${code}`);
+    wrapped.errorCode = err && err.errorCode;
+    wrapped.raw = err;
+    throw wrapped;
   }
 
   return { leave: leaveZoom };
