@@ -1,0 +1,177 @@
+/* ============================================================
+   Halo — layout.css
+   App shell, tab bar, view scaffolding.
+   ============================================================ */
+
+.app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.views {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(var(--safe-t) + 14px) calc(var(--safe-r) + 18px)
+           calc(var(--tabbar-h) + var(--safe-b) + 24px) calc(var(--safe-l) + 18px);
+  animation: fadeIn var(--dur) var(--ease);
+}
+
+.view-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.view-title { font-size: 30px; line-height: 1.05; }
+
+/* ---------- Tab bar ---------- */
+.tabbar {
+  position: relative;
+  z-index: 20;
+  height: calc(var(--tabbar-h) + var(--safe-b));
+  padding-bottom: var(--safe-b);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  background: var(--bg-glass);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border-top: 1px solid var(--stroke);
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-faint);
+  position: relative;
+  transition: color var(--dur) var(--ease), transform 0.12s var(--ease);
+  padding: 6px 0;
+}
+.tab:active { transform: scale(0.92); }
+.tab.active { color: var(--text); }
+.tab-ic { font-size: 20px; line-height: 1; }
+
+.tab.center { position: relative; }
+.tab-fab {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: var(--r-full);
+  background: var(--accent-grad);
+  color: #fff;
+  font-size: 26px;
+  font-weight: 300;
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-8px);
+  transition: transform 0.14s var(--ease);
+}
+.tab.center:active .tab-fab { transform: translateY(-8px) scale(0.9); }
+
+.badge {
+  position: absolute;
+  top: 2px;
+  right: calc(50% - 22px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* ---------- Quick grid ---------- */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+}
+@media (max-width: 380px) { .quick-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.quick-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  aspect-ratio: 1 / 0.86;
+  background: var(--bg-elev);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  transition: transform 0.12s var(--ease), background var(--dur);
+}
+.quick-tile:active { transform: scale(0.95); }
+.quick-tile .quick-ic { font-size: 22px; color: var(--text); }
+.quick-tile.primary {
+  background: var(--accent-grad);
+  border-color: transparent;
+  color: #fff;
+}
+.quick-tile.primary .quick-ic { color: #fff; }
+
+/* ---------- Meeting / convo lists ---------- */
+.meeting-list, .convo-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 6px;
+  border-radius: var(--r-md);
+  transition: background 0.15s var(--ease);
+}
+.list-row:active { background: var(--bg-elev); }
+
+.avatar {
+  width: 46px; height: 46px;
+  border-radius: var(--r-full);
+  display: grid; place-items: center;
+  font-size: 20px;
+  background: var(--bg-elev-2);
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+.avatar.grad { background: var(--accent-grad); }
+
+.row-main { flex: 1; min-width: 0; }
+.row-title { font-size: 15.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-sub { font-size: 13px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.row-meta { font-size: 12px; color: var(--text-faint); flex: 0 0 auto; text-align: right; }
+
+.search-wrap { margin-bottom: 8px; }
+.search {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font-size: 15px;
+  outline: none;
+}
+.search:focus { border-color: var(--accent); }
+
+.empty-state { text-align: center; color: var(--text-faint); padding: 60px 20px; }

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Halo" />
+  <meta name="description" content="Halo — an anonymous, ultra-ergonomic video meeting client for iPad, Safari and Chrome." />
+  <title>Halo</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./assets/icon.svg" />
+  <link rel="stylesheet" href="./css/base.css" />
+  <link rel="stylesheet" href="./css/layout.css" />
+  <link rel="stylesheet" href="./css/components.css" />
+  <link rel="stylesheet" href="./css/call.css" />
+</head>
+<body>
+  <div id="app" class="app" data-view="home">
+
+    <!-- ============ TAB VIEWS ============ -->
+    <main class="views">
+
+      <!-- HOME / MEETINGS -->
+      <section class="view view-home" data-view-panel="home">
+        <header class="view-head">
+          <div>
+            <p class="eyebrow">Anonymous session</p>
+            <h1 id="identityName" class="view-title">You</h1>
+          </div>
+          <button class="icon-btn" data-action="reroll-identity" aria-label="New anonymous identity"></button>
+        </header>
+
+        <div class="hero-card" id="heroCard">
+          <div class="hero-preview" id="heroPreview">
+            <canvas id="previewCanvas" class="hero-canvas"></canvas>
+            <div class="hero-fallback" id="heroFallback">
+              <span class="hero-avatar" id="heroAvatar">🙂</span>
+              <p>Camera off</p>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <button class="pill-btn" data-action="toggle-preview-cam">Preview camera</button>
+            <button class="pill-btn ghost" data-action="open-studio">Studio</button>
+          </div>
+        </div>
+
+        <div class="quick-grid">
+          <button class="quick-tile primary" data-action="new-meeting">
+            <span class="quick-ic">＋</span>
+            <span>New meeting</span>
+          </button>
+          <button class="quick-tile" data-action="join-meeting">
+            <span class="quick-ic">＃</span>
+            <span>Join</span>
+          </button>
+          <button class="quick-tile" data-action="open-gifbank">
+            <span class="quick-ic">◍</span>
+            <span>GIF bank</span>
+          </button>
+          <button class="quick-tile" data-action="open-browser">
+            <span class="quick-ic">◎</span>
+            <span>Browser</span>
+          </button>
+        </div>
+
+        <h2 class="section-label">Recent</h2>
+        <ul class="meeting-list" id="recentList"></ul>
+      </section>
+
+      <!-- INBOX -->
+      <section class="view view-inbox" data-view-panel="inbox" hidden>
+        <header class="view-head">
+          <h1 class="view-title">Inbox</h1>
+          <button class="text-btn" data-action="inbox-edit">Edit</button>
+        </header>
+        <div class="search-wrap">
+          <input class="search" id="inboxSearch" type="search" placeholder="Search conversations" />
+        </div>
+        <ul class="convo-list" id="convoList"></ul>
+        <div class="empty-state" id="inboxEmpty" hidden>
+          <p>No conversations</p>
+        </div>
+      </section>
+
+      <!-- STUDIO (filters / overlays / touch-up) -->
+      <section class="view view-studio" data-view-panel="studio" hidden>
+        <header class="view-head">
+          <h1 class="view-title">Studio</h1>
+          <button class="text-btn" data-action="studio-reset">Reset</button>
+        </header>
+
+        <div class="studio-stage">
+          <canvas id="studioCanvas" class="studio-canvas"></canvas>
+          <div class="studio-overlay-hint" id="studioHint">Turn on your camera to preview effects</div>
+        </div>
+
+        <div class="seg-tabs" role="tablist">
+          <button class="seg active" data-studio-tab="filters">Filters</button>
+          <button class="seg" data-studio-tab="overlays">Overlays</button>
+          <button class="seg" data-studio-tab="adjust">Adjust</button>
+        </div>
+
+        <div class="studio-panel" data-studio-panel="filters">
+          <div class="chip-rail" id="filterRail"></div>
+        </div>
+
+        <div class="studio-panel" data-studio-panel="overlays" hidden>
+          <div class="chip-rail" id="overlayRail"></div>
+        </div>
+
+        <div class="studio-panel" data-studio-panel="adjust" hidden>
+          <label class="slider-row">
+            <span>Touch up appearance</span>
+            <input type="range" min="0" max="100" value="0" data-adjust="touchup" />
+          </label>
+          <label class="slider-row">
+            <span>Adjust for low light</span>
+            <input type="range" min="0" max="100" value="0" data-adjust="lowlight" />
+          </label>
+          <label class="slider-row">
+            <span>Warmth</span>
+            <input type="range" min="-50" max="50" value="0" data-adjust="warmth" />
+          </label>
+          <label class="slider-row">
+            <span>Vibrance</span>
+            <input type="range" min="0" max="100" value="0" data-adjust="vibrance" />
+          </label>
+          <label class="switch-row">
+            <span>Auto‑rotation video mode</span>
+            <input type="checkbox" data-adjust="autorotate" />
+          </label>
+          <label class="switch-row">
+            <span>Mirror my video</span>
+            <input type="checkbox" data-adjust="mirror" checked />
+          </label>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ============ TAB BAR ============ -->
+    <nav class="tabbar" id="tabbar">
+      <button class="tab active" data-tab="home"><span class="tab-ic">⌂</span><span>Meet</span></button>
+      <button class="tab" data-tab="inbox"><span class="tab-ic">✉</span><span>Inbox</span><span class="badge" id="inboxBadge" hidden>0</span></button>
+      <button class="tab center" data-action="new-meeting"><span class="tab-fab">＋</span></button>
+      <button class="tab" data-tab="studio"><span class="tab-ic">✦</span><span>Studio</span></button>
+      <button class="tab" data-action="open-browser"><span class="tab-ic">◎</span><span>Web</span></button>
+    </nav>
+  </div>
+
+  <!-- ============ CALL SURFACE (full screen overlay) ============ -->
+  <div id="callSurface" class="call-surface" hidden aria-hidden="true">
+    <div class="call-stage" id="callStage">
+      <div class="video-grid" id="videoGrid" data-layout="gallery"></div>
+      <div class="windows-layer" id="windowsLayer"></div>
+    </div>
+
+    <div class="call-topbar" id="callTopbar">
+      <button class="round-btn small" data-action="leave-call" aria-label="Leave">✕</button>
+      <div class="call-meta">
+        <span class="rec-dot"></span>
+        <span id="callTitle">Meeting</span>
+        <span class="call-timer" id="callTimer">00:00</span>
+      </div>
+      <div class="call-top-actions">
+        <button class="round-btn small" data-action="cycle-layout" aria-label="Layout">▦</button>
+        <button class="round-btn small" data-action="flip-camera" aria-label="Flip camera">⟲</button>
+      </div>
+    </div>
+
+    <div class="call-controls" id="callControls">
+      <button class="ctrl" data-ctrl="mic" aria-label="Mute"><span class="ctrl-ic">🎙</span><span class="ctrl-label">Mute</span></button>
+      <button class="ctrl" data-ctrl="cam" aria-label="Camera"><span class="ctrl-ic">📷</span><span class="ctrl-label">Video</span></button>
+      <button class="ctrl" data-ctrl="studio" aria-label="Effects"><span class="ctrl-ic">✦</span><span class="ctrl-label">Effects</span></button>
+      <button class="ctrl" data-ctrl="participants" aria-label="Participants"><span class="ctrl-ic">👥</span><span class="ctrl-label">People</span></button>
+      <button class="ctrl" data-ctrl="chat" aria-label="Chat"><span class="ctrl-ic">💬</span><span class="ctrl-label">Chat</span></button>
+      <button class="ctrl" data-ctrl="more" aria-label="More"><span class="ctrl-ic">⋯</span><span class="ctrl-label">More</span></button>
+    </div>
+  </div>
+
+  <!-- ============ BOTTOM SHEET ============ -->
+  <div id="sheetScrim" class="sheet-scrim" hidden></div>
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3 id="sheetTitle">Sheet</h3><button class="text-btn" data-action="close-sheet">Done</button></div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+
+  <!-- ============ TOAST ============ -->
+  <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
