@@ -1,0 +1,129 @@
+/* ============================================================
+   Halo — base.css
+   Design tokens, reset, iOS-flavoured typography.
+   ============================================================ */
+
+:root {
+  /* Palette (dark-first, iOS 18 flavour) */
+  --bg:            #0a0a0f;
+  --bg-elev:       #14141c;
+  --bg-elev-2:     #1c1c26;
+  --bg-glass:      rgba(28, 28, 38, 0.72);
+  --stroke:        rgba(255, 255, 255, 0.08);
+  --stroke-strong: rgba(255, 255, 255, 0.16);
+
+  --text:          #f4f4f7;
+  --text-dim:      #a1a1ac;
+  --text-faint:    #6a6a76;
+
+  --accent:        #6c8cff;
+  --accent-2:      #a06bff;
+  --accent-grad:   linear-gradient(135deg, #6c8cff 0%, #a06bff 100%);
+  --green:         #34d399;
+  --red:           #ff5a6a;
+  --amber:         #ffb84d;
+
+  /* Radii */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 30px;
+  --r-full: 999px;
+
+  /* Shadows */
+  --shadow-1: 0 4px 20px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 8px 30px rgba(108, 140, 255, 0.35);
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur: 0.28s;
+
+  /* Layout */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --tabbar-h: 62px;
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter",
+          "Segoe UI", system-ui, sans-serif;
+}
+
+/* Light appearance for users who force it (kept subtle; app is designed dark) */
+@media (prefers-color-scheme: light) {
+  :root:not([data-force-dark]) {
+    --bg: #f2f2f7;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #ffffff;
+    --bg-glass: rgba(255,255,255,0.72);
+    --stroke: rgba(0,0,0,0.08);
+    --stroke-strong: rgba(0,0,0,0.14);
+    --text: #10101a;
+    --text-dim: #55555f;
+    --text-faint: #8a8a94;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+body {
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
+
+.eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.section-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 600;
+  margin: 18px 4px 10px;
+}
+
+[hidden] { display: none !important; }
+
+.fade-in { animation: fadeIn var(--dur) var(--ease); }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
+}

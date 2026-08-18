@@ -1,0 +1,15 @@
+{
+  "name": "Halo — Anonymous Video",
+  "short_name": "Halo",
+  "description": "An anonymous, ultra-ergonomic video meeting client for iPad, Safari and Chrome.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    { "src": "./assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
