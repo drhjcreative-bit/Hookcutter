@@ -79,9 +79,39 @@ function handleApi(req, res) {
   const urlPath = req.url.split('?')[0];
 
   if (req.method === 'GET' && urlPath === '/zoom-config') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     const enabled = !!(ZOOM_SDK_KEY && ZOOM_SDK_SECRET);
     res.end(JSON.stringify(enabled ? { enabled, sdkKey: ZOOM_SDK_KEY } : { enabled }));
+    return true;
+  }
+
+  if (req.method === 'GET' && urlPath === '/health') {
+    // Diagnostics: enough to debug setup, never enough to leak a credential.
+    // Zoom Client IDs are ~22 chars and Client Secrets are 32, so a 32-char
+    // "key" with a shorter "secret" almost certainly means the two are swapped.
+    const keyLen = ZOOM_SDK_KEY.length;
+    const secretLen = ZOOM_SDK_SECRET.length;
+    const body = {
+      ok: true,
+      uptimeSeconds: Math.round(process.uptime()),
+      signalling: { path: '/rtc', rooms: rooms.size, maxRoom: MAX_ROOM },
+      zoom: {
+        configured: !!(keyLen && secretLen),
+        sdkKeySet: !!keyLen,
+        sdkSecretSet: !!secretLen,
+        sdkKeyLength: keyLen,
+        sdkSecretLength: secretLen,
+        sdkKeyPreview: keyLen ? ZOOM_SDK_KEY.slice(0, 4) + '…' : null,
+        likelySwapped: keyLen === 32 && secretLen > 0 && secretLen < 32,
+      },
+    };
+    if (!body.zoom.configured) {
+      body.zoom.hint = 'Set ZOOM_SDK_KEY (Client ID) and ZOOM_SDK_SECRET (Client Secret), then restart the server.';
+    } else if (body.zoom.likelySwapped) {
+      body.zoom.hint = 'ZOOM_SDK_KEY looks like a Client Secret — the two values are probably swapped.';
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(body, null, 2));
     return true;
   }
 
@@ -232,4 +262,12 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Halo server on :${PORT}  (web=${WEB_ROOT})`);
+  if (ZOOM_SDK_KEY && ZOOM_SDK_SECRET) {
+    console.log(`Zoom interop: ENABLED (sdkKey ${ZOOM_SDK_KEY.slice(0, 4)}…, ${ZOOM_SDK_KEY.length} chars)`);
+    if (ZOOM_SDK_KEY.length === 32 && ZOOM_SDK_SECRET.length < 32) {
+      console.warn('Zoom interop: WARNING — ZOOM_SDK_KEY looks like a Client Secret; the values may be swapped.');
+    }
+  } else {
+    console.log('Zoom interop: disabled (set ZOOM_SDK_KEY and ZOOM_SDK_SECRET to enable). Diagnostics: /health');
+  }
 });

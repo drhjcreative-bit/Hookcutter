@@ -1,7 +1,10 @@
 /* Halo — service worker. Cache-first app shell so the client opens
    instantly and works offline (calls still need a network/camera). */
 
-const CACHE = 'halo-v2';
+const CACHE = 'halo-v3';
+// Routes that must always hit the network (live server state).
+const NETWORK_ONLY = ['/zoom-config', '/zoom-signature', '/health', '/rtc'];
+
 const SHELL = [
   './',
   './index.html',
@@ -44,12 +47,24 @@ self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  // Only handle same-origin app-shell requests; let everything else pass through.
+  // Only handle same-origin requests; let everything else pass through.
   if (url.origin !== self.location.origin) return;
+
+  // NEVER cache live API/diagnostic routes. Caching /zoom-config would pin the
+  // app to whatever capability state it saw first — so adding the Zoom keys
+  // later would appear to do nothing until the cache was cleared.
+  if (NETWORK_ONLY.some((p) => url.pathname === p || url.pathname.startsWith(p + '/'))) {
+    e.respondWith(fetch(request));
+    return;
+  }
+
   e.respondWith(
     caches.match(request).then((cached) => cached || fetch(request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+      // Only persist successful, basic (same-origin) responses.
+      if (res && res.ok && res.type === 'basic') {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+      }
       return res;
     }).catch(() => cached))
   );
