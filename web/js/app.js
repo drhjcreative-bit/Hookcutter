@@ -162,38 +162,121 @@ async function startCall(meeting) {
   haptic(20);
 }
 
+// Demo peers are OPT-IN only (?demo=1). Filling a failed call with fake
+// participants made a broken connection look like a working meeting.
+const DEMO_MODE = new URLSearchParams(location.search).has('demo');
+
+function inviteLink(code) {
+  const url = new URL(location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('room', String(code).replace(/\s+/g, ''));
+  return url.toString();
+}
+
+/** The banner that tells the truth about the call's connection state. */
+function setRoomStatus(state, meeting) {
+  const stage = $('#callStage');
+  if (!stage) return;
+  let el = $('#roomStatus');
+  if (state === 'hidden') { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'roomStatus';
+    el.className = 'room-status';
+    stage.appendChild(el);
+  }
+  el.classList.toggle('warn', state === 'offline');
+
+  if (state === 'connecting') {
+    el.innerHTML = `<div class="rs-main"><div class="rs-title">Connecting…</div>
+      <div class="rs-sub">Reaching the meeting server</div></div>`;
+    return;
+  }
+
+  if (state === 'alone') {
+    el.innerHTML = `<div class="rs-main"><div class="rs-title">You're the only one here</div>
+      <div class="rs-sub">Others join with code <span class="rs-code">${escapeHtml(meeting.code)}</span></div></div>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Copy invite';
+    btn.addEventListener('click', async () => {
+      const link = inviteLink(meeting.code);
+      try {
+        if (navigator.share) { await navigator.share({ title: 'Join my Halo room', url: link }); }
+        else { await navigator.clipboard.writeText(link); toast('Invite link copied'); }
+      } catch { toast(link, 6000); }
+    });
+    el.appendChild(btn);
+    return;
+  }
+
+  if (state === 'offline') {
+    el.innerHTML = `<div class="rs-main"><div class="rs-title">Can't reach the meeting server</div>
+      <div class="rs-sub">Nobody else can join this room right now.</div></div>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => connectRoom(meeting));
+    el.appendChild(btn);
+    return;
+  }
+
+  if (state === 'demo') {
+    el.innerHTML = `<div class="rs-main"><div class="rs-title">Demo mode</div>
+      <div class="rs-sub">These participants are simulated — remove ?demo=1 for real calls.</div></div>`;
+  }
+}
+
+/** Show the banner only while the call has no real peers. */
+function refreshRoomStatus(meeting) {
+  if (!mesh) return;
+  const others = participants.people.filter(p => !p.isSelf).length;
+  setRoomStatus(others > 0 ? 'hidden' : 'alone', meeting);
+}
+
 async function connectRoom(m) {
-  // Try the real WebRTC mesh; fall back to simulated demo peers.
   const room = String(m.code).replace(/\s+/g, '');
   const audioTracks = media.stream ? media.stream.getAudioTracks() : [];
   const outStream = pipeline.getBroadcastStream({ audioTracks });
 
-  if (CONFIG.signalUrl) {
-    participants.startReal();
-    mesh = new MeshClient({
-      room,
-      identity: store.get('identity'),
-      localStream: outStream,
-      handlers: {
-        onPeerAdd: (id, info) => participants.addRealPeer(id, info),
-        onRemoteStream: (id, stream) => participants.attachStream(id, stream),
-        onPeerRemove: (id) => participants.removeRealPeer(id),
-        onState: (id, st) => participants.setPeerState(id, st),
-        onChat: (msg) => { pushCallChat({ from: 'them', text: msg.text, gif: msg.gif, name: msg.name }); },
-        onRoomFull: (max) => toast(`Room full (max ${max})`),
-        onDisconnect: () => toast('Signalling disconnected'),
-      },
-    });
-    try {
-      await mesh.connect();
-      toast(`Room live — share code ${m.code}`);
-      return;
-    } catch (_) {
-      mesh = null; // fall through to demo mode
-    }
+  if (DEMO_MODE) {
+    participants.start(3);
+    setRoomStatus('demo', m);
+    return;
   }
-  participants.start(3);
-  toast('Demo mode — no backend reachable');
+
+  if (!CONFIG.signalUrl) {
+    participants.startReal();
+    setRoomStatus('offline', m);
+    return;
+  }
+
+  participants.startReal();
+  setRoomStatus('connecting', m);
+
+  if (mesh) { mesh.close(); mesh = null; }
+  mesh = new MeshClient({
+    room,
+    identity: store.get('identity'),
+    localStream: outStream,
+    handlers: {
+      onPeerAdd: (id, info) => { participants.addRealPeer(id, info); refreshRoomStatus(m); },
+      onRemoteStream: (id, stream) => participants.attachStream(id, stream),
+      onPeerRemove: (id) => { participants.removeRealPeer(id); refreshRoomStatus(m); },
+      onState: (id, st) => participants.setPeerState(id, st),
+      onChat: (msg) => { pushCallChat({ from: 'them', text: msg.text, gif: msg.gif, name: msg.name }); },
+      onRoomFull: (max) => toast(`Room full (max ${max})`),
+      onDisconnect: () => { setRoomStatus('offline', m); },
+    },
+  });
+
+  try {
+    await mesh.connect();
+    refreshRoomStatus(m);
+  } catch (_) {
+    mesh = null;
+    // Be honest: no fake people, just what actually happened.
+    setRoomStatus('offline', m);
+  }
 }
 
 function leaveCall() {
@@ -201,6 +284,7 @@ function leaveCall() {
   if (mesh) { mesh.close(); mesh = null; }
   pipeline.stopBroadcast();
   participants.stop();
+  setRoomStatus('hidden');
   $('#windowsLayer').innerHTML = '';
   window.__callMsgs = [];
   const surface = $('#callSurface');
@@ -456,6 +540,87 @@ function genCode() {
   return `${n()} ${n()} ${n()}`;
 }
 
+async function joinZoomFlow(meetingNumber, passcode = '', userName) {
+  toast('Connecting to Zoom…');
+  try {
+    await joinZoomMeeting({
+      meetingNumber,
+      passcode,
+      userName: userName || store.get('identity').name,
+    });
+  } catch (e) {
+    const msg = e && e.message === 'zoom-not-configured'
+      ? 'Zoom keys not configured on the server — see /health'
+      : `Zoom: ${(e && (e.message || e.reason)) || 'could not join'}`;
+    toast(msg, 6000);
+    console.error('[Halo] Zoom join failed:', e && e.raw ? e.raw : e);
+  }
+}
+
+function zoomForm(zoomCfg) {
+  const pane = document.createElement('div');
+  const me = store.get('identity');
+
+  if (!zoomCfg.enabled) {
+    // Previously this option simply did not render, so "no Zoom tab" looked
+    // like a broken app. Say exactly what is missing and how to check.
+    pane.innerHTML = `
+      <p style="font-size:14px;line-height:1.5;margin-bottom:12px">
+        Joining <b>real Zoom meetings</b> needs this server to hold your own Zoom
+        Meeting SDK credentials. It isn't configured yet.</p>
+      <ol style="font-size:13px;line-height:1.6;color:var(--text-dim);padding-left:18px;margin-bottom:14px">
+        <li>marketplace.zoom.us → Build App → <b>General app</b> with the <b>Meeting SDK</b> feature</li>
+        <li>Set <code>ZOOM_SDK_KEY</code> (Client ID) and <code>ZOOM_SDK_SECRET</code> (Client Secret) on the server</li>
+        <li>Restart the server, then reload this page</li>
+      </ol>`;
+    const btn = document.createElement('button');
+    btn.className = 'pill-btn ghost'; btn.style.width = '100%';
+    btn.textContent = 'Check server status (/health)';
+    btn.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/health', { cache: 'no-store' });
+        const h = await r.json();
+        const z = h.zoom || {};
+        toast(z.configured ? 'Server has the keys — reload this page'
+          : (z.hint || 'Server does not see the Zoom keys'), 7000);
+        console.log('[Halo] /health', h);
+      } catch { toast('Could not reach /health — is the server running?', 5000); }
+    });
+    pane.appendChild(btn);
+    return pane;
+  }
+
+  pane.innerHTML = `
+    <input class="search" data-z="mn" placeholder="Zoom meeting ID" inputmode="numeric" style="margin-bottom:10px">
+    <input class="search" data-z="pw" placeholder="Passcode (if any)" style="margin-bottom:10px">
+    <input class="search" data-z="name" placeholder="Display name" value="${escapeHtml(me.name)}" style="margin-bottom:12px">
+    <p style="font-size:12px;color:var(--text-faint);margin:0 0 14px">
+      Joins the real Zoom meeting via Zoom's official SDK. Halo filters and overlays
+      apply to Halo rooms only — Zoom captures the camera itself.</p>`;
+  const btn = document.createElement('button');
+  btn.className = 'pill-btn'; btn.style.width = '100%'; btn.textContent = 'Join Zoom meeting';
+  btn.addEventListener('click', async () => {
+    const mn = pane.querySelector('[data-z="mn"]').value.replace(/\D/g, '');
+    if (!mn) { toast('Enter the Zoom meeting ID'); return; }
+    const passcode = pane.querySelector('[data-z="pw"]').value.trim();
+    const userName = pane.querySelector('[data-z="name"]').value.trim() || me.name;
+    closeSheet();
+    await joinZoomFlow(mn, passcode, userName);
+  });
+  pane.appendChild(btn);
+  return pane;
+}
+
+async function zoomPrompt(prefillId) {
+  const zoomCfg = await getZoomConfig();
+  const pane = zoomForm(zoomCfg);
+  if (prefillId) {
+    const f = pane.querySelector('[data-z="mn"]');
+    if (f) f.value = prefillId;
+  }
+  openSheet('Join a Zoom meeting', pane);
+}
+
 async function joinMeetingPrompt() {
   const zoomCfg = await getZoomConfig();
   const wrap = document.createElement('div');
@@ -463,48 +628,38 @@ async function joinMeetingPrompt() {
   /* ---- Halo room pane ---- */
   const haloPane = document.createElement('div');
   haloPane.innerHTML = `<input class="search" id="joinCode" placeholder="Enter meeting code" inputmode="numeric" style="margin-bottom:14px">`;
+  const haloHint = document.createElement('p');
+  haloHint.style.cssText = 'font-size:12px;color:var(--text-faint);margin:-6px 0 14px';
+  haloHint.textContent = 'A Halo room only connects people using this app with the same code. It is not a Zoom meeting ID.';
+  haloPane.appendChild(haloHint);
+
   const haloBtn = document.createElement('button');
-  haloBtn.className = 'pill-btn'; haloBtn.style.width = '100%'; haloBtn.textContent = 'Join meeting';
+  haloBtn.className = 'pill-btn'; haloBtn.style.width = '100%'; haloBtn.textContent = 'Join Halo room';
   haloBtn.addEventListener('click', () => {
-    const code = $('#joinCode', haloPane).value.trim() || genCode();
+    const raw = $('#joinCode', haloPane).value.trim();
+    const digits = raw.replace(/\D/g, '');
+    // Zoom meeting IDs are 9-11 digits. Typing one here silently creates an
+    // empty Halo room, which is the single most confusing thing this app can
+    // do — so intercept it and offer the right destination instead.
+    if (zoomCfg.enabled && digits.length >= 9 && digits.length <= 11) {
+      closeSheet();
+      openSheet('That looks like a Zoom ID', actionList([
+        { icon: '🎥', label: 'Join it as a real Zoom meeting', onClick: () => { closeSheet(); zoomPrompt(digits); } },
+        { icon: '＃', label: 'No — make a Halo room with this code', onClick: () => { closeSheet(); startCall({ title: 'Meeting ' + digits, code: digits, emoji: '🎥', at: Date.now() }); } },
+      ]));
+      return;
+    }
+    const code = raw || genCode();
     closeSheet();
     startCall({ title: 'Meeting ' + code, code, emoji: '🎥', at: Date.now() });
   });
   haloPane.appendChild(haloBtn);
 
-  /* ---- Real Zoom pane (shown when SDK keys are configured) ---- */
-  const zoomPane = document.createElement('div');
+  /* ---- Real Zoom pane ---- */
+  const zoomPane = zoomForm(zoomCfg);
   zoomPane.hidden = true;
-  if (zoomCfg.enabled) {
-    const me = store.get('identity');
-    zoomPane.innerHTML = `
-      <input class="search" data-z="mn" placeholder="Zoom meeting ID" inputmode="numeric" style="margin-bottom:10px">
-      <input class="search" data-z="pw" placeholder="Passcode (if any)" style="margin-bottom:10px">
-      <input class="search" data-z="name" placeholder="Display name" value="${escapeHtml(me.name)}" style="margin-bottom:14px">
-      <p style="font-size:12px;color:var(--text-faint);margin:0 0 14px">Joins the real Zoom meeting via Zoom's official SDK. Halo filters/overlays apply in Halo rooms only.</p>`;
-    const zoomBtn = document.createElement('button');
-    zoomBtn.className = 'pill-btn'; zoomBtn.style.width = '100%'; zoomBtn.textContent = 'Join Zoom meeting';
-    zoomBtn.addEventListener('click', async () => {
-      const mn = zoomPane.querySelector('[data-z="mn"]').value.replace(/\D/g, '');
-      if (!mn) { toast('Enter the Zoom meeting ID'); return; }
-      const passcode = zoomPane.querySelector('[data-z="pw"]').value.trim();
-      const userName = zoomPane.querySelector('[data-z="name"]').value.trim() || store.get('identity').name;
-      closeSheet();
-      toast('Connecting to Zoom…');
-      try {
-        await joinZoomMeeting({ meetingNumber: mn, passcode, userName });
-      } catch (e) {
-        const msg = e && e.message === 'zoom-not-configured'
-          ? 'Zoom keys not configured on the server — see /health'
-          : `Zoom: ${(e && (e.message || e.reason)) || 'could not join'}`;
-        toast(msg, 6000);
-        console.error('[Halo] Zoom join failed:', e && e.raw ? e.raw : e);
-      }
-    });
-    zoomPane.appendChild(zoomBtn);
-  }
 
-  if (zoomCfg.enabled) {
+  {
     const tabs = document.createElement('div');
     tabs.className = 'seg-tabs';
     tabs.innerHTML = `<button class="seg active" data-join-tab="halo">Halo room</button><button class="seg" data-join-tab="zoom">Zoom meeting</button>`;
@@ -519,14 +674,6 @@ async function joinMeetingPrompt() {
   }
 
   wrap.append(haloPane, zoomPane);
-
-  if (!zoomCfg.enabled) {
-    const hint = document.createElement('p');
-    hint.style.cssText = 'font-size:12px;color:var(--text-faint);margin-top:14px';
-    hint.textContent = 'Want to join real Zoom meetings from here? Add ZOOM_SDK_KEY & ZOOM_SDK_SECRET on the server (see README).';
-    wrap.appendChild(hint);
-  }
-
   openSheet('Join a meeting', wrap);
 }
 
@@ -543,6 +690,7 @@ function initActions() {
       case 'open-studio': setView('studio'); break;
       case 'new-meeting': haptic(); startCall(); break;
       case 'join-meeting': joinMeetingPrompt(); break;
+      case 'join-zoom': zoomPrompt(); break;
       case 'open-gifbank': openGifBank(); break;
       case 'open-browser': openBrowserWindowSafely(); break;
       case 'close-sheet': closeSheet(); break;
@@ -586,6 +734,14 @@ function boot() {
   pipeline.setActive(studioCanvas, false);
 
   setView('home');
+
+  // Deep link: ?room=CODE drops straight into that Halo room, so an invite
+  // link is one tap instead of "type these nine digits".
+  const roomParam = new URLSearchParams(location.search).get('room');
+  if (roomParam) {
+    const code = roomParam.replace(/\s+/g, '');
+    startCall({ title: 'Meeting ' + code, code, emoji: '🎥', at: Date.now() });
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
