@@ -1,7 +1,7 @@
 /* Halo — service worker. Cache-first app shell so the client opens
    instantly and works offline (calls still need a network/camera). */
 
-const CACHE = 'halo-v1';
+const CACHE = 'halo-v2';
 const SHELL = [
   './',
   './index.html',
@@ -26,6 +26,7 @@ const SHELL = [
   './js/gifbank.js',
   './js/gif-encoder.js',
   './js/windows.js',
+  './js/zoom.js',
 ];
 
 self.addEventListener('install', (e) => {

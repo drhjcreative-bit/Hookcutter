@@ -135,3 +135,34 @@ the same room and connect directly.
 
 Client files added for the backend: `js/config.js` (endpoints/ICE) and
 `js/rtc.js` (mesh client).
+
+## Joining REAL Zoom meetings (optional)
+
+Halo's own rooms only connect people using *this app*. To join **actual Zoom
+meetings** (rooms full of people on regular Zoom), Halo integrates the official
+**Zoom Meeting SDK** — Zoom's supported way to build a custom client. It needs
+your own Zoom credentials:
+
+1. Go to <https://marketplace.zoom.us> → **Develop → Build App** → create a
+   **General app** with the **Meeting SDK** feature enabled (free).
+2. Copy its **Client ID** and **Client Secret**.
+3. Set them as environment variables where the server runs (on Replit:
+   *Tools → Secrets*):
+   - `ZOOM_SDK_KEY` = Client ID
+   - `ZOOM_SDK_SECRET` = Client Secret
+4. Restart the server. The **Join** sheet now shows a *Zoom meeting* tab —
+   enter the meeting ID + passcode and a display name of your choosing.
+
+How it works: the browser asks `POST /zoom-signature` for a short-lived HS256
+JWT signed server-side (`server.js#zoomSignature`) — the secret never leaves
+the server — then loads Zoom's Meeting SDK (component view) and joins.
+
+Honest limits (Zoom's web SDK, not Halo):
+- Halo **filters/overlays don't pipe into Zoom meetings** — Zoom's SDK captures
+  the camera itself and the web build doesn't accept injected video. Effects
+  apply in Halo rooms only.
+- Waiting rooms, passcodes, and "authenticated users only" meeting settings
+  still apply; hosts see whoever joins. Anonymity here means your display name.
+- The SDK version is pinned in `js/zoom.js` (`DEFAULT_VERSION`); Zoom retires
+  old versions quarterly, so bump it if joins start failing with a version
+  error (override without a deploy via `window.HALO_ZOOM_SDK_VERSION`).
