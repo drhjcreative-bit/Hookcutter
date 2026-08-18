@@ -167,6 +167,23 @@ Honest limits (Zoom's web SDK, not Halo):
   old versions quarterly, so bump it if joins start failing with a version
   error (override without a deploy via `window.HALO_ZOOM_SDK_VERSION`).
 
+### "The room is empty / full of strangers I don't know"
+
+Two different things used to look identical, which was the app's fault:
+
+- **Halo rooms only connect people using this app** with the *same code*. A
+  Zoom meeting ID typed into the *Halo room* tab just creates an empty Halo
+  room named after those digits. The Join sheet now detects a 9–11 digit ID and
+  asks which you meant.
+- **Simulated participants are now opt-in only** (`?demo=1`). They used to
+  appear automatically whenever the signalling connection failed, which made a
+  broken call look like a working one. A call now always states the truth:
+  *Connecting…*, *You're the only one here* (with a **Copy invite** button), or
+  a red *Can't reach the meeting server* with a Retry.
+
+Invite links: the in-call **Copy invite** button produces
+`https://your-host/?room=CODE`, and opening that link joins the room directly.
+
 ### Troubleshooting the Zoom tab
 
 **"I added the keys but the Zoom tab never appears."** Open `/health` on your
