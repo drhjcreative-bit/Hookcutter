@@ -17,6 +17,7 @@ import { openBrowserWindow } from './windows.js';
 import { openSheet, closeSheet, actionList, toast, haptic, escapeHtml } from './ui.js';
 import { MeshClient } from './rtc.js';
 import { CONFIG } from './config.js';
+import { getZoomConfig, joinZoomMeeting } from './zoom.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -455,17 +456,76 @@ function genCode() {
   return `${n()} ${n()} ${n()}`;
 }
 
-function joinMeetingPrompt() {
+async function joinMeetingPrompt() {
+  const zoomCfg = await getZoomConfig();
   const wrap = document.createElement('div');
-  wrap.innerHTML = `<input class="search" id="joinCode" placeholder="Enter meeting code" inputmode="numeric" style="margin-bottom:14px">`;
-  const btn = document.createElement('button');
-  btn.className = 'pill-btn'; btn.style.width = '100%'; btn.textContent = 'Join meeting';
-  btn.addEventListener('click', () => {
-    const code = $('#joinCode', wrap).value.trim() || genCode();
+
+  /* ---- Halo room pane ---- */
+  const haloPane = document.createElement('div');
+  haloPane.innerHTML = `<input class="search" id="joinCode" placeholder="Enter meeting code" inputmode="numeric" style="margin-bottom:14px">`;
+  const haloBtn = document.createElement('button');
+  haloBtn.className = 'pill-btn'; haloBtn.style.width = '100%'; haloBtn.textContent = 'Join meeting';
+  haloBtn.addEventListener('click', () => {
+    const code = $('#joinCode', haloPane).value.trim() || genCode();
     closeSheet();
     startCall({ title: 'Meeting ' + code, code, emoji: '🎥', at: Date.now() });
   });
-  wrap.appendChild(btn);
+  haloPane.appendChild(haloBtn);
+
+  /* ---- Real Zoom pane (shown when SDK keys are configured) ---- */
+  const zoomPane = document.createElement('div');
+  zoomPane.hidden = true;
+  if (zoomCfg.enabled) {
+    const me = store.get('identity');
+    zoomPane.innerHTML = `
+      <input class="search" data-z="mn" placeholder="Zoom meeting ID" inputmode="numeric" style="margin-bottom:10px">
+      <input class="search" data-z="pw" placeholder="Passcode (if any)" style="margin-bottom:10px">
+      <input class="search" data-z="name" placeholder="Display name" value="${escapeHtml(me.name)}" style="margin-bottom:14px">
+      <p style="font-size:12px;color:var(--text-faint);margin:0 0 14px">Joins the real Zoom meeting via Zoom's official SDK. Halo filters/overlays apply in Halo rooms only.</p>`;
+    const zoomBtn = document.createElement('button');
+    zoomBtn.className = 'pill-btn'; zoomBtn.style.width = '100%'; zoomBtn.textContent = 'Join Zoom meeting';
+    zoomBtn.addEventListener('click', async () => {
+      const mn = zoomPane.querySelector('[data-z="mn"]').value.replace(/\D/g, '');
+      if (!mn) { toast('Enter the Zoom meeting ID'); return; }
+      const passcode = zoomPane.querySelector('[data-z="pw"]').value.trim();
+      const userName = zoomPane.querySelector('[data-z="name"]').value.trim() || store.get('identity').name;
+      closeSheet();
+      toast('Connecting to Zoom…');
+      try {
+        await joinZoomMeeting({ meetingNumber: mn, passcode, userName });
+      } catch (e) {
+        const msg = e && e.reason ? e.reason
+          : e && e.message === 'zoom-not-configured' ? 'Zoom keys not configured on the server'
+          : 'Could not join the Zoom meeting';
+        toast(msg, 3500);
+      }
+    });
+    zoomPane.appendChild(zoomBtn);
+  }
+
+  if (zoomCfg.enabled) {
+    const tabs = document.createElement('div');
+    tabs.className = 'seg-tabs';
+    tabs.innerHTML = `<button class="seg active" data-join-tab="halo">Halo room</button><button class="seg" data-join-tab="zoom">Zoom meeting</button>`;
+    tabs.addEventListener('click', (e) => {
+      const seg = e.target.closest('[data-join-tab]');
+      if (!seg) return;
+      tabs.querySelectorAll('.seg').forEach(s => s.classList.toggle('active', s === seg));
+      haloPane.hidden = seg.dataset.joinTab !== 'halo';
+      zoomPane.hidden = seg.dataset.joinTab !== 'zoom';
+    });
+    wrap.appendChild(tabs);
+  }
+
+  wrap.append(haloPane, zoomPane);
+
+  if (!zoomCfg.enabled) {
+    const hint = document.createElement('p');
+    hint.style.cssText = 'font-size:12px;color:var(--text-faint);margin-top:14px';
+    hint.textContent = 'Want to join real Zoom meetings from here? Add ZOOM_SDK_KEY & ZOOM_SDK_SECRET on the server (see README).';
+    wrap.appendChild(hint);
+  }
+
   openSheet('Join a meeting', wrap);
 }
 

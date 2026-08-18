@@ -14,6 +14,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -44,7 +45,72 @@ function safeJoin(root, urlPath) {
   return resolved;
 }
 
+/* ---------------- Zoom Meeting SDK interop ----------------
+   Optional. Set ZOOM_SDK_KEY / ZOOM_SDK_SECRET (a Zoom Marketplace
+   "Meeting SDK" app's Client ID / Client Secret) and the client gains a
+   "Join Zoom meeting" mode that enters REAL Zoom meetings via the
+   official Meeting SDK. The secret never leaves this server — the
+   browser only ever receives a short-lived HS256 join signature. */
+const ZOOM_SDK_KEY = process.env.ZOOM_SDK_KEY || '';
+const ZOOM_SDK_SECRET = process.env.ZOOM_SDK_SECRET || '';
+
+const b64url = (buf) => Buffer.from(buf).toString('base64')
+  .replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+function zoomSignature(meetingNumber, role) {
+  const iat = Math.floor(Date.now() / 1000) - 30;
+  const exp = iat + 60 * 60 * 2; // 2h, within Zoom's 48h cap
+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({
+    appKey: ZOOM_SDK_KEY,
+    sdkKey: ZOOM_SDK_KEY,
+    mn: String(meetingNumber),
+    role,
+    iat,
+    exp,
+    tokenExp: exp,
+  }));
+  const sig = b64url(crypto.createHmac('sha256', ZOOM_SDK_SECRET)
+    .update(`${header}.${payload}`).digest());
+  return `${header}.${payload}.${sig}`;
+}
+
+function handleApi(req, res) {
+  const urlPath = req.url.split('?')[0];
+
+  if (req.method === 'GET' && urlPath === '/zoom-config') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const enabled = !!(ZOOM_SDK_KEY && ZOOM_SDK_SECRET);
+    res.end(JSON.stringify(enabled ? { enabled, sdkKey: ZOOM_SDK_KEY } : { enabled }));
+    return true;
+  }
+
+  if (req.method === 'POST' && urlPath === '/zoom-signature') {
+    if (!ZOOM_SDK_KEY || !ZOOM_SDK_SECRET) {
+      res.writeHead(503); res.end('Zoom SDK keys not configured'); return true;
+    }
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const { meetingNumber, role } = JSON.parse(body || '{}');
+        const mn = String(meetingNumber || '').replace(/\D/g, '');
+        if (!mn) { res.writeHead(400); res.end('meetingNumber required'); return; }
+        const signature = zoomSignature(mn, role === 1 ? 1 : 0);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ signature, sdkKey: ZOOM_SDK_KEY }));
+      } catch {
+        res.writeHead(400); res.end('bad request');
+      }
+    });
+    return true;
+  }
+
+  return false;
+}
+
 const server = http.createServer((req, res) => {
+  if (handleApi(req, res)) return;
   let urlPath = req.url === '/' ? '/index.html' : req.url;
   let filePath = safeJoin(WEB_ROOT, urlPath);
   if (!filePath) { res.writeHead(403); return res.end('Forbidden'); }
