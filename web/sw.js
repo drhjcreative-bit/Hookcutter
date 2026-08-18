@@ -12,6 +12,8 @@ const SHELL = [
   './css/components.css',
   './css/call.css',
   './js/app.js',
+  './js/config.js',
+  './js/rtc.js',
   './js/state.js',
   './js/identity.js',
   './js/ui.js',

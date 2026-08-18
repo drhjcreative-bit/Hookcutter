@@ -15,6 +15,8 @@ import { initInbox, updateBadge } from './inbox.js';
 import { importImageAsGif, listGifs, deleteGif, gifUrl, captureLiveGif } from './gifbank.js';
 import { openBrowserWindow } from './windows.js';
 import { openSheet, closeSheet, actionList, toast, haptic, escapeHtml } from './ui.js';
+import { MeshClient } from './rtc.js';
+import { CONFIG } from './config.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -24,6 +26,7 @@ const previewCanvas = $('#previewCanvas');
 const studioCanvas = $('#studioCanvas');
 
 let callTimer = null;
+let mesh = null;
 
 /* ---------------- View routing ---------------- */
 function setView(name) {
@@ -146,7 +149,7 @@ async function startCall(meeting) {
   if (!media.ready) await media.start();
   updateControlStates();
 
-  participants.start(3);
+  await connectRoom(m);
 
   // timer
   const t0 = Date.now();
@@ -158,10 +161,47 @@ async function startCall(meeting) {
   haptic(20);
 }
 
+async function connectRoom(m) {
+  // Try the real WebRTC mesh; fall back to simulated demo peers.
+  const room = String(m.code).replace(/\s+/g, '');
+  const audioTracks = media.stream ? media.stream.getAudioTracks() : [];
+  const outStream = pipeline.getBroadcastStream({ audioTracks });
+
+  if (CONFIG.signalUrl) {
+    participants.startReal();
+    mesh = new MeshClient({
+      room,
+      identity: store.get('identity'),
+      localStream: outStream,
+      handlers: {
+        onPeerAdd: (id, info) => participants.addRealPeer(id, info),
+        onRemoteStream: (id, stream) => participants.attachStream(id, stream),
+        onPeerRemove: (id) => participants.removeRealPeer(id),
+        onState: (id, st) => participants.setPeerState(id, st),
+        onChat: (msg) => { pushCallChat({ from: 'them', text: msg.text, gif: msg.gif, name: msg.name }); },
+        onRoomFull: (max) => toast(`Room full (max ${max})`),
+        onDisconnect: () => toast('Signalling disconnected'),
+      },
+    });
+    try {
+      await mesh.connect();
+      toast(`Room live — share code ${m.code}`);
+      return;
+    } catch (_) {
+      mesh = null; // fall through to demo mode
+    }
+  }
+  participants.start(3);
+  toast('Demo mode — no backend reachable');
+}
+
 function leaveCall() {
   clearInterval(callTimer);
+  if (mesh) { mesh.close(); mesh = null; }
+  pipeline.stopBroadcast();
   participants.stop();
   $('#windowsLayer').innerHTML = '';
+  window.__callMsgs = [];
   const surface = $('#callSurface');
   surface.hidden = true;
   surface.setAttribute('aria-hidden', 'true');
@@ -182,12 +222,14 @@ function initCallControls() {
     const on = media.toggleMic();
     participants.setSelfMuted(!on);
     updateControlStates();
+    if (mesh) mesh.sendState({ muted: !on, camOff: !media.camOn });
     toast(on ? 'Unmuted' : 'Muted');
   });
   $('[data-ctrl="cam"]').addEventListener('click', async () => {
     await media.toggleCamera();
     updateControlStates();
     participants.render();
+    if (mesh) mesh.sendState({ muted: !media.micOn, camOff: !media.camOn });
   });
   $('[data-ctrl="studio"]').addEventListener('click', () => openEffectsSheet());
   $('[data-ctrl="participants"]').addEventListener('click', () => openParticipantsSheet());
@@ -305,35 +347,47 @@ function openMoreSheet() {
   ]));
 }
 
+// Append a message to the in-meeting chat buffer and repaint if open.
+function pushCallChat(msg) {
+  const buf = window.__callMsgs || (window.__callMsgs = []);
+  buf.push(msg);
+  if (window.__repaintCallChat) window.__repaintCallChat();
+  else if (msg.from === 'them') toast(`${msg.name || 'Someone'}: ${msg.gif ? 'GIF' : (msg.text || '')}`);
+}
+
 function openCallChat() {
-  const c = { id: 'call', name: 'In‑meeting chat', avatar: '💬', messages: window.__callMsgs || (window.__callMsgs = []) };
-  import('./inbox.js'); // ensure module warm
-  // reuse a simple inline chat
+  const messages = window.__callMsgs || (window.__callMsgs = []);
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;height:64vh';
   const log = document.createElement('div');
   log.className = 'chat-log'; log.style.cssText = 'flex:1;overflow-y:auto';
   const paint = () => {
-    log.innerHTML = c.messages.map(m => `<div class="chat-msg ${m.from === 'me' ? 'me' : 'them'}">${m.gif ? `<img src="${m.gif}">` : escapeHtml(m.text)}</div>`).join('') || '<p style="color:var(--text-faint);text-align:center;padding:30px">No messages yet</p>';
+    log.innerHTML = messages.map(m => `<div class="chat-msg ${m.from === 'me' ? 'me' : 'them'}">${m.from === 'them' && m.name ? `<div class="chat-author">${escapeHtml(m.name)}</div>` : ''}${m.gif ? `<img src="${m.gif}">` : escapeHtml(m.text)}</div>`).join('') || '<p style="color:var(--text-faint);text-align:center;padding:30px">No messages yet</p>';
     log.scrollTop = log.scrollHeight;
   };
   paint();
+  window.__repaintCallChat = paint;
+
   const inputRow = document.createElement('div');
   inputRow.className = 'chat-input-row';
   inputRow.innerHTML = `<button class="chat-send" data-gif style="background:var(--bg-elev-2);color:var(--text)">GIF</button><input placeholder="Message everyone"><button class="chat-send" data-send>➤</button>`;
   const input = inputRow.querySelector('input');
-  const send = (msg) => { c.messages.push(msg); paint(); };
-  inputRow.querySelector('[data-send]').addEventListener('click', () => { const v = input.value.trim(); if (v) { send({ from: 'me', text: v }); input.value = ''; } });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = input.value.trim(); if (v) { send({ from: 'me', text: v }); input.value = ''; } } });
+  const me = store.get('identity');
+  const send = (msg) => {
+    pushCallChat({ ...msg, from: 'me' });
+    if (mesh) mesh.sendChat({ name: me.name, text: msg.text, gif: msg.gif });
+  };
+  inputRow.querySelector('[data-send]').addEventListener('click', () => { const v = input.value.trim(); if (v) { send({ text: v }); input.value = ''; } });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = input.value.trim(); if (v) { send({ text: v }); input.value = ''; } } });
   inputRow.querySelector('[data-gif]').addEventListener('click', async () => {
     const gifs = await listGifs();
     if (!gifs.length) return toast('GIF bank is empty');
     const picker = document.createElement('div'); picker.className = 'gif-grid';
-    gifs.slice(0, 12).forEach(g => { const cell = document.createElement('div'); cell.className = 'gif-cell'; cell.innerHTML = `<img src="${gifUrl(g)}">`; cell.addEventListener('click', () => { send({ from: 'me', gif: gifUrl(g) }); closeSheet(); openCallChat(); }); picker.appendChild(cell); });
+    gifs.slice(0, 12).forEach(g => { const cell = document.createElement('div'); cell.className = 'gif-cell'; cell.innerHTML = `<img src="${gifUrl(g)}">`; cell.addEventListener('click', () => { send({ gif: gifUrl(g) }); closeSheet(); openCallChat(); }); picker.appendChild(cell); });
     openSheet('Send a GIF', picker);
   });
   wrap.append(log, inputRow);
-  openSheet('Chat', wrap);
+  openSheet('Chat', wrap, () => { window.__repaintCallChat = null; });
 }
 
 /* ---------------- GIF bank ---------------- */

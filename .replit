@@ -1,0 +1,17 @@
+# Replit configuration for the Halo video client + signalling server.
+run = "cd server && npm install && npm start"
+entrypoint = "server/server.js"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "cd server && npm install && npm start"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[env]
+PORT = "3000"

@@ -26,10 +26,15 @@ class Participants {
     this._unregister = null;
   }
 
+  _selfPerson() {
+    const me = store.get('identity');
+    return { id: 'self', name: me.name, avatar: me.avatar, isSelf: true, muted: !media.micOn, hidden: false, talking: false };
+  }
+
+  // Simulated demo peers (offline / no backend).
   start(peerCount = 3) {
     this.grid = document.getElementById('videoGrid');
-    const me = store.get('identity');
-    this.people = [{ id: 'self', name: me.name, avatar: me.avatar, isSelf: true, muted: !media.micOn, hidden: false, talking: false }];
+    this.people = [this._selfPerson()];
     for (let i = 0; i < peerCount; i++) {
       const p = peerIdentity(i + 3);
       this.people.push({ id: 'p' + i, name: p.name, avatar: p.avatar, isSelf: false, muted: Math.random() > 0.5, hidden: false, talking: false });
@@ -37,6 +42,41 @@ class Participants {
     this.spotlightId = this.people[0].id;
     this.render();
     this._startTalkSim();
+  }
+
+  // Real mesh mode: start with just self; peers arrive via signalling.
+  startReal() {
+    this.grid = document.getElementById('videoGrid');
+    this.people = [this._selfPerson()];
+    this.spotlightId = 'self';
+    this.render();
+  }
+
+  addRealPeer(id, info) {
+    if (this.people.find(p => p.id === id)) return;
+    this.people.push({ id, name: info.name, avatar: info.avatar, isSelf: false, muted: false, camOff: false, hidden: false, talking: false, stream: null });
+    this.render();
+  }
+
+  attachStream(id, stream) {
+    const p = this.people.find(x => x.id === id);
+    if (!p) return;
+    p.stream = stream;
+    this.render();
+  }
+
+  removeRealPeer(id) {
+    this.people = this.people.filter(p => p.id !== id);
+    if (this.spotlightId === id) { const v = this.visible(); this.spotlightId = v.length ? v[0].id : null; }
+    this.render();
+  }
+
+  setPeerState(id, st) {
+    const p = this.people.find(x => x.id === id);
+    if (!p) return;
+    if ('muted' in st) p.muted = st.muted;
+    if ('camOff' in st) p.camOff = st.camOff;
+    this.render();
   }
 
   stop() {
@@ -176,6 +216,17 @@ class Participants {
       this._selfCanvas = canvas;
       // mirror handled inside pipeline; remove CSS mirror to avoid double flip
       tile.classList.remove('mirror');
+    } else if (!p.isSelf && p.stream && !p.camOff) {
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', '');
+      video.muted = false;
+      video.srcObject = p.stream;
+      const play = video.play();
+      if (play && play.catch) play.catch(() => {});
+      tile.classList.remove('mirror');
+      tile.appendChild(video);
     } else {
       const av = document.createElement('div');
       av.className = 'tile-avatar';

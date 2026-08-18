@@ -19,6 +19,7 @@ class Pipeline {
     this.octx = this.offscreen.getContext('2d', { willReadFrequently: true });
     this.running = false;
     this.overlayNudge = { x: 0, y: 0 };
+    this.broadcastCanvas = null;    // fixed-size canvas fed to captureStream()
     this._loop = this._loop.bind(this);
   }
 
@@ -47,11 +48,18 @@ class Pipeline {
     if (!this.running) return;
     requestAnimationFrame(this._loop);
 
-    const anyActive = [...this.targets.values()].some(x => x.active);
+    const anyActive = [...this.targets.values()].some(x => x.active) || !!this.broadcastCanvas;
     if (!anyActive) return;
 
     const v = media.video;
-    if (!media.ready || v.readyState < 2 || !v.videoWidth) return;
+    const ready = media.ready && v.readyState >= 2 && v.videoWidth;
+
+    if (!ready) {
+      // Camera off: keep the broadcast track alive with a placeholder so
+      // remote peers see a "camera off" tile instead of a frozen frame.
+      if (this.broadcastCanvas) this._paintPlaceholder(this.broadcastCanvas);
+      return;
+    }
 
     const effects = store.get('effects');
     this._renderOffscreen(v, effects, t);
@@ -59,7 +67,53 @@ class Pipeline {
     for (const [canvas, meta] of this.targets) {
       if (meta.active) this._blit(canvas);
     }
+    if (this.broadcastCanvas) this._blitFixed(this.broadcastCanvas);
   }
+
+  _paintPlaceholder(canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.fillStyle = '#0c0c12';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#6a6a76';
+    ctx.font = `${Math.round(h * 0.18)}px system-ui, "Apple Color Emoji", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('📷', w / 2, h / 2);
+  }
+
+  // Blit the processed offscreen into a fixed-size canvas (cover-fit),
+  // ignoring layout size — used for the captureStream broadcast canvas.
+  _blitFixed(canvas) {
+    const ctx = canvas.getContext('2d');
+    const cw = canvas.width, ch = canvas.height;
+    const ow = this.offscreen.width, oh = this.offscreen.height;
+    if (!ow || !oh) return;
+    const sAsp = ow / oh, dAsp = cw / ch;
+    let sx = 0, sy = 0, sWidth = ow, sHeight = oh;
+    if (sAsp > dAsp) { sWidth = oh * dAsp; sx = (ow - sWidth) / 2; }
+    else { sHeight = ow / dAsp; sy = (oh - sHeight) / 2; }
+    ctx.drawImage(this.offscreen, sx, sy, sWidth, sHeight, 0, 0, cw, ch);
+  }
+
+  /**
+   * Build an outgoing MediaStream: the processed video (via a fixed-size
+   * canvas captureStream) plus the given audio tracks. Used for WebRTC.
+   */
+  getBroadcastStream({ fps = 30, audioTracks = [] } = {}) {
+    if (!this.broadcastCanvas) {
+      const c = document.createElement('canvas');
+      c.width = 640; c.height = 480;
+      this.broadcastCanvas = c;
+      this._paintPlaceholder(c);
+    }
+    this.ensureRunning();
+    const stream = this.broadcastCanvas.captureStream(fps);
+    for (const track of audioTracks) stream.addTrack(track);
+    return stream;
+  }
+
+  stopBroadcast() { this.broadcastCanvas = null; }
 
   _renderOffscreen(v, effects, t) {
     let vw = v.videoWidth, vh = v.videoHeight;

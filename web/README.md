@@ -5,10 +5,17 @@ A self-contained, ultra-ergonomic **Zoom-style video client** built to run in
 step, no framework, no accounts — just static files you can serve anywhere and
 later port to Lovable / Replit.
 
-> Halo is an *emulator/reference client*: your own camera is real (via
-> `getUserMedia`), and the other participants are simulated so the full UX —
-> grid, spotlight, controls, effects — works end-to-end without a signalling
-> server. Drop in a WebRTC/SFU backend later and the same UI drives real calls.
+> Halo runs in **two modes automatically**:
+> - **Real calls** when served by `server/` (or any host running it): a
+>   WebSocket signalling relay connects participants into a **WebRTC mesh** —
+>   real peer-to-peer audio/video, and peers see your *filtered* canvas because
+>   the outgoing track is the processed studio output.
+> - **Demo mode** when opened as static files with no backend reachable: your
+>   own camera is real and the other participants are simulated, so the full UX
+>   still works offline.
+>
+> The client picks the mode on its own: it tries the signalling server, and
+> falls back to simulated peers if none answers within a couple of seconds.
 
 ---
 
@@ -97,13 +104,34 @@ a short animated GIF straight from the processed camera feed.
 
 ---
 
-## Porting to a real backend
+## Backend (real calls)
 
-The UI is backend-agnostic. To make calls real:
+`server/server.js` is a single Node process that:
 
-1. Replace the simulated peers in `participants.js` with remote `MediaStream`s.
-2. Add signalling (WebSocket) + a WebRTC SFU (LiveKit / mediasoup / Daily).
-3. Feed the local processed canvas as an outgoing track via
-   `canvas.captureStream()` so filters/overlays are seen by others.
+1. Serves the static `web/` client.
+2. Hosts a WebSocket signalling relay at `/rtc` that connects participants into
+   a **WebRTC mesh**. Media never touches the server — it only relays SDP/ICE;
+   audio and video flow peer-to-peer.
 
-Nothing else in the UI needs to change.
+Run it:
+
+```bash
+cd server && npm install && npm start   # serves the app + signalling on :3000
+```
+
+Then open `http://localhost:3000` (camera needs HTTPS in production — automatic
+on Replit / Render / Fly). Two people entering the **same meeting code** land in
+the same room and connect directly.
+
+- **Topology:** mesh (each client dials every other). Great for small anonymous
+  rooms; for large calls swap the relay for an SFU (LiveKit / mediasoup) — the
+  client's `rtc.js` is the only file that changes.
+- **NAT traversal:** public STUN by default (`config.js`). Add a TURN server
+  there for restrictive networks.
+- **Outgoing video** is the processed canvas (`pipeline.getBroadcastStream()`),
+  so remote peers see your filters and overlays, plus your mic track.
+- **Signalling URL** defaults to the serving origin; override with
+  `window.HALO_SIGNAL_URL` or `?signal=wss://…`.
+
+Client files added for the backend: `js/config.js` (endpoints/ICE) and
+`js/rtc.js` (mesh client).
