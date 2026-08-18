@@ -103,11 +103,11 @@
 /* ---------- Quick grid ---------- */
 .quick-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
   gap: 10px;
   margin-top: 18px;
 }
-@media (max-width: 380px) { .quick-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 380px) { .quick-grid { grid-template-columns: repeat(3, 1fr); } }
 
 .quick-tile {
   display: flex;
