@@ -20,24 +20,50 @@
      meeting settings still apply. Anonymity = your display name.
    ============================================================ */
 
-const DEFAULT_VERSION = '3.8.10';
+// Zoom retires Meeting SDK versions on a rolling basis, and a pinned version
+// that has been withdrawn 404s at the CDN — which would present as a dead
+// "Join" button. Rather than bet on one version, try a list newest-first and
+// use whichever actually loads. Override with window.HALO_ZOOM_SDK_VERSION.
+const SDK_VERSIONS = ['4.0.0', '3.13.2', '3.11.0', '3.9.0', '3.8.10'];
 
 let sdkPromise = null;
 let active = null; // { client, host }
+let loadedVersion = null;
 
-function loadSdk(version) {
-  if (window.ZoomMtgEmbedded) return Promise.resolve();
-  if (!sdkPromise) {
-    sdkPromise = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = `https://source.zoom.us/${version}/zoom-meeting-embedded-${version}.min.js`;
-      s.onload = () => resolve();
-      s.onerror = () => { sdkPromise = null; reject(new Error('Zoom SDK failed to load')); };
-      document.head.appendChild(s);
-    });
-  }
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => { el.remove(); reject(new Error('load failed: ' + src)); };
+    document.head.appendChild(el);
+  });
+}
+
+async function loadSdk(preferred) {
+  if (window.ZoomMtgEmbedded) return;
+  if (sdkPromise) return sdkPromise;
+
+  const candidates = preferred ? [preferred, ...SDK_VERSIONS.filter(v => v !== preferred)] : SDK_VERSIONS;
+  sdkPromise = (async () => {
+    const tried = [];
+    for (const v of candidates) {
+      try {
+        await loadScript(`https://source.zoom.us/${v}/zoom-meeting-embedded-${v}.min.js`);
+        if (window.ZoomMtgEmbedded) { loadedVersion = v; return; }
+        tried.push(`${v} (loaded but no global)`);
+      } catch {
+        tried.push(v);
+      }
+    }
+    sdkPromise = null;
+    throw new Error(`Zoom SDK would not load. Tried: ${tried.join(', ')}. ` +
+      'Set window.HALO_ZOOM_SDK_VERSION to a current version from Zoom\'s release notes.');
+  })();
   return sdkPromise;
 }
+
+export function loadedSdkVersion() { return loadedVersion; }
 
 export async function getZoomConfig() {
   try {
@@ -68,8 +94,7 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
   const cfg = await getZoomConfig();
   if (!cfg.enabled) throw new Error('zoom-not-configured');
 
-  const version = window.HALO_ZOOM_SDK_VERSION || cfg.sdkVersion || DEFAULT_VERSION;
-  await loadSdk(version);
+  await loadSdk(window.HALO_ZOOM_SDK_VERSION || cfg.sdkVersion || null);
 
   const res = await fetch('/zoom-signature', {
     method: 'POST',

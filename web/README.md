@@ -163,9 +163,12 @@ Honest limits (Zoom's web SDK, not Halo):
   apply in Halo rooms only.
 - Waiting rooms, passcodes, and "authenticated users only" meeting settings
   still apply; hosts see whoever joins. Anonymity here means your display name.
-- The SDK version is pinned in `js/zoom.js` (`DEFAULT_VERSION`); Zoom retires
-  old versions quarterly, so bump it if joins start failing with a version
-  error (override without a deploy via `window.HALO_ZOOM_SDK_VERSION`).
+- Zoom retires Meeting SDK versions on a rolling basis. `js/zoom.js` therefore
+  tries `SDK_VERSIONS` newest-first and uses whichever actually loads, so one
+  withdrawn version no longer produces a dead Join button. If every candidate
+  is gone, the error names each version tried; set
+  `window.HALO_ZOOM_SDK_VERSION` to a current one from Zoom's release notes
+  (or add it to `SDK_VERSIONS`).
 
 ### "The room is empty / full of strangers I don't know"
 
