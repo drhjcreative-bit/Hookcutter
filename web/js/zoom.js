@@ -1,8 +1,9 @@
 /* ============================================================
    Halo — zoom.js
    Real-Zoom interop via the official Zoom Meeting SDK
-   (component view). Halo's own rooms are pure WebRTC; this module
-   is the bridge into ACTUAL Zoom meetings.
+   (component view), wrapped in Halo's OWN chrome: Halo top bar,
+   Halo control bar, Halo sheets. Zoom renders the meeting video
+   inside the stage; Halo's buttons drive the SDK.
 
    Requirements (server side): ZOOM_SDK_KEY / ZOOM_SDK_SECRET env
    vars — the Client ID / Client Secret of a Zoom Marketplace
@@ -13,12 +14,18 @@
    JWT does, per Zoom's SDK auth model.
 
    Known limits of Zoom's *web* SDK (not Halo bugs):
+   - The remote participant video tiles are rendered BY Zoom inside
+     the stage. Zoom does not let third parties re-render other
+     people's video in a real meeting, so the tiles themselves are
+     Zoom's — everything around them is Halo.
    - Halo filters/overlays do not pipe into Zoom meetings — the SDK
      captures the camera itself and web builds don't accept custom
      video injection. Effects apply in Halo rooms only.
    - Waiting rooms, passcodes, and "authenticated users only"
      meeting settings still apply. Anonymity = your display name.
    ============================================================ */
+
+import { toast, haptic, openSheet, escapeHtml } from './ui.js';
 
 // Zoom retires Meeting SDK versions on a rolling basis, and a pinned version
 // that has been withdrawn 404s at the CDN — which would present as a dead
@@ -27,7 +34,7 @@
 const SDK_VERSIONS = ['4.0.0', '3.13.2', '3.11.0', '3.9.0', '3.8.10'];
 
 let sdkPromise = null;
-let active = null; // { client, host }
+let active = null; // { client, host, timer, t0, micMuted, camOn }
 let loadedVersion = null;
 
 function loadScript(src) {
@@ -74,10 +81,244 @@ export async function getZoomConfig() {
   }
 }
 
+/* ---------- defensive SDK access ----------
+   The component-view API surface shifts between SDK releases, and this
+   build cannot pin one version (see SDK_VERSIONS). Every SDK call goes
+   through firstMethod(): try a list of method names, use the first that
+   exists. When none exists the caller falls back to revealing Zoom's own
+   controls, so no button is ever silently dead. */
+function firstMethod(obj, names) {
+  for (const n of names) {
+    if (obj && typeof obj[n] === 'function') return obj[n].bind(obj);
+  }
+  return null;
+}
+
+function currentUser(client) {
+  try {
+    const fn = firstMethod(client, ['getCurrentUser', 'getCurrentUserInfo']);
+    return fn ? fn() : null;
+  } catch { return null; }
+}
+
+function attendees(client) {
+  try {
+    const fn = firstMethod(client, ['getAttendeeslist', 'getAttendeesList', 'getParticipantsList']);
+    const list = fn ? fn() : null;
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+function isMuted(user) {
+  if (!user) return null;
+  if (typeof user.muted === 'boolean') return user.muted;
+  if (user.audio && typeof user.audio.muted === 'boolean') return user.audio.muted;
+  return null;
+}
+
+function isVideoOn(user) {
+  if (!user) return null;
+  if (typeof user.bVideoOn === 'boolean') return user.bVideoOn;
+  if (typeof user.isVideoOn === 'boolean') return user.isVideoOn;
+  return null;
+}
+
+/* ---------- Halo shell ---------- */
+
+function fmtMeeting(meetingNumber) {
+  const s = String(meetingNumber);
+  // Zoom convention: 3-4-4 for 11-digit IDs, 3-3-4 for 10-digit.
+  const m = s.match(/^(\d{3})(\d{3,4})(\d{4})$/);
+  return m ? `${m[1]} ${m[2]} ${m[3]}` : s.replace(/(\d{3})(?=\d)/g, '$1 ');
+}
+
+function ctrlButton(key, icon, label) {
+  return `<button class="ctrl" data-zc="${key}">
+    <div class="ctrl-ic">${icon}</div><span class="ctrl-label">${label}</span>
+  </button>`;
+}
+
+function buildShell(meetingNumber) {
+  const host = document.createElement('div');
+  host.className = 'zoom-host';
+  host.innerHTML = `
+    <div class="zoom-topbar">
+      <div class="zt-meta">
+        <span class="zt-title">Zoom · ${escapeHtml(fmtMeeting(meetingNumber))}</span>
+        <span class="call-timer" data-zc="timer">00:00</span>
+      </div>
+      <div class="call-top-actions">
+        <span class="zt-count" data-zc="count" title="Participants"></span>
+        <button class="round-btn small" data-zc="leave-x" aria-label="Leave Zoom meeting">✕</button>
+      </div>
+    </div>
+    <div class="zoom-stage"><div class="zoom-root"></div></div>
+    <div class="call-controls zoom-controls">
+      ${ctrlButton('mic', '🎙️', 'Mute')}
+      ${ctrlButton('cam', '📷', 'Video')}
+      ${ctrlButton('people', '👥', 'People')}
+      ${ctrlButton('native', '🎛', 'Zoom UI')}
+      ${ctrlButton('leave', '📞', 'Leave').replace('class="ctrl"', 'class="ctrl danger"')}
+    </div>`;
+  return host;
+}
+
+function $z(sel) { return active ? active.host.querySelector(sel) : null; }
+
+/** Zoom's own chrome is hidden by default (Halo drives the meeting). If an
+    SDK build lacks an API Halo needs, we reveal Zoom's controls instead of
+    leaving a dead button. */
+function revealNative(reason) {
+  if (!active) return;
+  if (!active.host.classList.contains('show-native')) {
+    active.host.classList.add('show-native');
+    const btn = $z('[data-zc="native"]');
+    if (btn) btn.classList.add('active');
+  }
+  if (reason) toast(reason, 4500);
+}
+
+function paintControls() {
+  if (!active) return;
+  const me = currentUser(active.client);
+  const muted = isMuted(me);
+  if (muted !== null) active.micMuted = muted;
+  const vid = isVideoOn(me);
+  if (vid !== null) active.camOn = vid;
+
+  const mic = $z('[data-zc="mic"]');
+  if (mic) {
+    mic.classList.toggle('off', !!active.micMuted);
+    mic.querySelector('.ctrl-label').textContent = active.micMuted ? 'Unmute' : 'Mute';
+  }
+  const cam = $z('[data-zc="cam"]');
+  if (cam) {
+    cam.classList.toggle('off', !active.camOn);
+    cam.querySelector('.ctrl-label').textContent = active.camOn ? 'Video' : 'Start';
+  }
+  const count = $z('[data-zc="count"]');
+  if (count) {
+    const n = attendees(active.client).length;
+    count.textContent = n > 0 ? `${n} 👥` : '';
+  }
+}
+
+async function zoomToggleMic() {
+  if (!active) return;
+  haptic();
+  const target = !active.micMuted;
+  const fn = firstMethod(active.client, ['mute', 'muteAudio']);
+  if (!fn) { revealNative("This Zoom SDK build has no mute API — use Zoom's controls"); return; }
+  try {
+    await fn(target);
+    active.micMuted = target;
+    toast(target ? 'Muted' : 'Unmuted');
+  } catch (e) {
+    toast('Zoom: could not change mute' + (e && e.reason ? ` — ${e.reason}` : ''), 4000);
+  }
+  paintControls();
+}
+
+async function zoomToggleVideo() {
+  if (!active) return;
+  haptic();
+  const wantOn = !active.camOn;
+  const fn = wantOn
+    ? firstMethod(active.client, ['startVideo', 'startVideoCapture', 'unmuteVideo'])
+    : firstMethod(active.client, ['stopVideo', 'stopVideoCapture', 'muteVideo']);
+  if (!fn) { revealNative("This Zoom SDK build has no video API — use Zoom's controls"); return; }
+  try {
+    await fn();
+    active.camOn = wantOn;
+  } catch (e) {
+    toast('Zoom: could not change video' + (e && e.reason ? ` — ${e.reason}` : ''), 4000);
+  }
+  paintControls();
+}
+
+function zoomPeopleSheet() {
+  if (!active) return;
+  const list = attendees(active.client);
+  const wrap = document.createElement('div');
+  if (!list.length) {
+    wrap.innerHTML = '<p style="color:var(--text-faint);text-align:center;padding:24px">Participant list unavailable in this Zoom SDK build.</p>';
+  } else {
+    const me = currentUser(active.client);
+    list.forEach(p => {
+      const self = me && p.userId === me.userId;
+      const bits = [];
+      if (isMuted(p)) bits.push('Muted');
+      if (isVideoOn(p) === false) bits.push('Camera off');
+      if (p.isHost) bits.push('Host');
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      row.innerHTML = `
+        <div class="avatar grad">${self ? '🫵' : '👤'}</div>
+        <div class="row-main">
+          <div class="row-title">${self ? 'You' : escapeHtml(p.displayName || 'Guest')}</div>
+          <div class="row-sub">${bits.join(' · ') || 'Active'}</div>
+        </div>`;
+      wrap.appendChild(row);
+    });
+  }
+  openSheet(`People · ${list.length || '?'}`, wrap);
+}
+
+function toggleNativeUi() {
+  if (!active) return;
+  haptic();
+  const shown = active.host.classList.toggle('show-native');
+  const btn = $z('[data-zc="native"]');
+  if (btn) btn.classList.toggle('active', shown);
+  toast(shown ? "Zoom's own controls shown" : "Zoom's own controls hidden");
+}
+
+function wireShell(host) {
+  host.querySelector('[data-zc="mic"]').addEventListener('click', zoomToggleMic);
+  host.querySelector('[data-zc="cam"]').addEventListener('click', zoomToggleVideo);
+  host.querySelector('[data-zc="people"]').addEventListener('click', zoomPeopleSheet);
+  host.querySelector('[data-zc="native"]').addEventListener('click', toggleNativeUi);
+  host.querySelector('[data-zc="leave"]').addEventListener('click', leaveZoom);
+  host.querySelector('[data-zc="leave-x"]').addEventListener('click', leaveZoom);
+}
+
+function startShellLoop() {
+  if (!active) return;
+  active.t0 = Date.now();
+  active.timer = setInterval(() => {
+    if (!active) return;
+    const el = $z('[data-zc="timer"]');
+    if (el) {
+      const s = Math.floor((Date.now() - active.t0) / 1000);
+      el.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    }
+    // Also refresh mic/cam state — catches changes made through Zoom's own
+    // UI (when revealed) or by the host force-muting everyone.
+    paintControls();
+  }, 1000);
+}
+
+function wireSdkEvents(client) {
+  const on = firstMethod(client, ['on']);
+  if (!on) return;
+  const safe = (ev, cb) => { try { on(ev, cb); } catch { /* event not in this build */ } };
+  safe('connection-change', (p) => {
+    const state = p && (p.state || p.status);
+    if (state === 'Closed' || state === 'Fail' || state === 'Ended') {
+      toast('Zoom meeting ended');
+      leaveZoom();
+    }
+  });
+  safe('user-added', paintControls);
+  safe('user-removed', paintControls);
+  safe('user-updated', paintControls);
+}
+
 export function leaveZoom() {
   if (!active) return;
-  const { client, host } = active;
+  const { client, host, timer } = active;
   active = null;
+  clearInterval(timer);
   try {
     if (typeof client.leaveMeeting === 'function') client.leaveMeeting();
     else if (typeof client.leave === 'function') client.leave();
@@ -86,9 +327,9 @@ export function leaveZoom() {
 }
 
 /**
- * Join a real Zoom meeting. Throws 'zoom-not-configured' if the server
- * has no SDK keys, or rethrows the SDK's join error (bad passcode,
- * invalid signature, meeting not started, …).
+ * Join a real Zoom meeting inside Halo's own chrome. Throws
+ * 'zoom-not-configured' if the server has no SDK keys, or rethrows the
+ * SDK's join error (bad passcode, invalid signature, not started, …).
  */
 export async function joinZoomMeeting({ meetingNumber, passcode = '', userName = 'Guest' }) {
   const cfg = await getZoomConfig();
@@ -104,29 +345,34 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
   if (!res.ok) throw new Error(`signature-failed (${res.status})`);
   const { signature, sdkKey } = await res.json();
 
-  // Full-screen host with a Halo top bar so you can always get out.
-  const host = document.createElement('div');
-  host.className = 'zoom-host';
-  const topbar = document.createElement('div');
-  topbar.className = 'zoom-topbar';
-  const leaveBtn = document.createElement('button');
-  leaveBtn.className = 'round-btn small';
-  leaveBtn.textContent = '✕';
-  leaveBtn.setAttribute('aria-label', 'Leave Zoom meeting');
-  const title = document.createElement('span');
-  title.textContent = `Zoom · ${String(meetingNumber).replace(/(\d{3})(?=\d)/g, '$1 ')}`;
-  topbar.append(leaveBtn, title);
-  const root = document.createElement('div');
-  root.className = 'zoom-root';
-  host.append(topbar, root);
+  const host = buildShell(meetingNumber);
   document.body.appendChild(host);
-  leaveBtn.addEventListener('click', leaveZoom);
+  const root = host.querySelector('.zoom-root');
+  wireShell(host);
 
   const client = window.ZoomMtgEmbedded.createClient();
-  active = { client, host };
+  active = { client, host, timer: null, t0: 0, micMuted: false, camOn: false };
+
+  // Size Zoom's video panel to fill the Halo stage.
+  const stageRect = root.getBoundingClientRect();
+  const vw = Math.max(320, Math.floor(stageRect.width));
+  const vh = Math.max(240, Math.floor(stageRect.height));
 
   try {
-    await client.init({ zoomAppRoot: root, language: 'en-US', patchJsMedia: true });
+    await client.init({
+      zoomAppRoot: root,
+      language: 'en-US',
+      patchJsMedia: true,
+      customize: {
+        video: {
+          isResizable: false,
+          popper: { disableDraggable: true },
+          defaultViewType: 'gallery',
+          viewSizes: { default: { width: vw, height: vh }, ribbon: { width: vw, height: vh } },
+        },
+        meetingInfo: ['topic', 'host', 'participant'],
+      },
+    });
     await client.join({
       sdkKey,
       signature,
@@ -145,6 +391,10 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
     wrapped.raw = err;
     throw wrapped;
   }
+
+  wireSdkEvents(client);
+  startShellLoop();
+  paintControls();
 
   return { leave: leaveZoom };
 }

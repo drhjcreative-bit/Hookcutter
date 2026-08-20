@@ -213,7 +213,13 @@
 .win-resize::after { content: ""; position: absolute; right: 5px; bottom: 5px; width: 9px; height: 9px;
   border-right: 2px solid var(--text-faint); border-bottom: 2px solid var(--text-faint); }
 
-/* ---------- Real-Zoom surface (Meeting SDK host) ---------- */
+/* ---------- Real-Zoom surface (Halo shell around the Meeting SDK) ----------
+   Zoom renders the meeting video inside .zoom-root; everything around it —
+   top bar, timer, control bar — is Halo's own chrome. Zoom's built-in
+   toolbar is suppressed by default (best-effort: Zoom's class names are
+   generated, so we match fragments) and can be revealed with the
+   "Zoom UI" control, which is also the fallback whenever an SDK build
+   lacks an API a Halo button needs. */
 .zoom-host {
   position: fixed;
   inset: 0;
@@ -226,13 +232,26 @@
 .zoom-topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: calc(var(--safe-t) + 10px) 14px 10px;
-  background: var(--bg);
+  background: linear-gradient(180deg, rgba(0,0,0,0.55), transparent);
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
-  border-bottom: 1px solid var(--stroke);
+}
+.zoom-topbar .zt-meta {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.zoom-topbar .call-top-actions { align-items: center; }
+.zt-count { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.zoom-stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
 }
 .zoom-root {
   flex: 1;
@@ -240,6 +259,19 @@
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   background: #0a0a0f;
+  display: grid;
+  place-items: center;
+}
+.zoom-controls { flex: 0 0 auto; }
+.zoom-controls .ctrl.active .ctrl-ic { background: #fff; color: #000; }
+/* Best-effort suppression of Zoom's own chrome inside the stage. Scoped to
+   .zoom-root so it cannot affect Halo's UI; if Zoom renames everything this
+   simply matches nothing and the "Zoom UI" toggle still works. */
+.zoom-host:not(.show-native) .zoom-root [class*="toolbar"],
+.zoom-host:not(.show-native) .zoom-root [class*="footer"],
+.zoom-host:not(.show-native) .zoom-root [class*="controlbar"],
+.zoom-host:not(.show-native) .zoom-root [class*="ControlBar"] {
+  display: none !important;
 }
 
 /* in-app browser chrome */

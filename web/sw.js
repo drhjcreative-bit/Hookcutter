@@ -1,7 +1,7 @@
 /* Halo — service worker. Cache-first app shell so the client opens
    instantly and works offline (calls still need a network/camera). */
 
-const CACHE = 'halo-v3';
+const CACHE = 'halo-v4';
 // Routes that must always hit the network (live server state).
 const NETWORK_ONLY = ['/zoom-config', '/zoom-signature', '/health', '/rtc'];
 
