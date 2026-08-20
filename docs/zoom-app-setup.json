@@ -1,0 +1,69 @@
+{
+  "_README": [
+    "Zoom does NOT accept this file as an upload. A Meeting SDK app is configured",
+    "by filling in the form at https://marketplace.zoom.us. This file is a checklist",
+    "of the exact values to enter there, kept in the repo so the setup is reproducible.",
+    "Replace every <PLACEHOLDER>. Never commit the client secret."
+  ],
+
+  "zoom_marketplace_app": {
+    "app_type": "General App",
+    "app_name": "Halo",
+    "intended_audience": "Just me (personal use)",
+
+    "required_feature": {
+      "Meeting SDK": "ENABLED",
+      "_why": "Without this toggle the app still issues a Client ID/Secret, but they cannot sign a valid meeting join. This is the single most common cause of a failed first join."
+    },
+
+    "app_credentials": {
+      "client_id": "NetTln8zSWLjzeWQaEgpA",
+      "client_secret": "<KEEP OUT OF GIT — paste only into the server's env>",
+      "_maps_to_env": {
+        "client_id": "ZOOM_SDK_KEY",
+        "client_secret": "ZOOM_SDK_SECRET"
+      }
+    },
+
+    "urls": {
+      "app_url_home": "https://<your-repl>.replit.dev/",
+      "redirect_url_for_oauth": "https://<your-repl>.replit.dev/",
+      "oauth_allow_list": ["https://<your-repl>.replit.dev/"],
+      "domain_allow_list": ["https://<your-repl>.replit.dev"],
+      "_why": "The Meeting SDK checks the origin the page is served from. If the deployed URL is missing here, joins are rejected even with correct credentials."
+    },
+
+    "activation": {
+      "state_required": "Activated, or your own Zoom account added under Local Test / Add Test Users",
+      "_why": "Marketplace apps sit in a draft state after creation. A draft app rejects joins."
+    }
+  },
+
+  "server_env": {
+    "ZOOM_SDK_KEY": "<Client ID>",
+    "ZOOM_SDK_SECRET": "<Client Secret>",
+    "_where": "Replit: Tools -> Secrets. Restart the server after setting these.",
+    "_verify": "GET /health -> zoom.configured must be true and zoom.likelySwapped false"
+  },
+
+  "signature_the_server_generates": {
+    "_note": "Emitted by server.js#zoomSignature and sent to the browser by POST /zoom-signature. Shown here so the shape can be checked against Zoom's docs. HS256, signed with the client secret, which never leaves the server.",
+    "header": { "alg": "HS256", "typ": "JWT" },
+    "payload": {
+      "appKey": "<Client ID>",
+      "sdkKey": "<Client ID>",
+      "mn": "<meeting number, digits only>",
+      "role": 0,
+      "iat": "<now - 30s>",
+      "exp": "<iat + 7200>",
+      "tokenExp": "<same as exp>"
+    }
+  },
+
+  "troubleshooting": {
+    "3712": "Signature invalid — Client ID/Secret mismatch, or the Meeting SDK feature is not enabled on the app.",
+    "no_zoom_tab_in_app": "Server does not see the env vars. Check /health, then restart.",
+    "join_button_does_nothing": "Old service worker serving stale code. Reload in a private tab, or clear website data.",
+    "sdk_version_error": "js/zoom.js walks SDK_VERSIONS newest-first; if all fail, set window.HALO_ZOOM_SDK_VERSION to a current version from Zoom's release notes."
+  }
+}
