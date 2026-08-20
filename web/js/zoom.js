@@ -132,8 +132,8 @@ function fmtMeeting(meetingNumber) {
   return m ? `${m[1]} ${m[2]} ${m[3]}` : s.replace(/(\d{3})(?=\d)/g, '$1 ');
 }
 
-function ctrlButton(key, icon, label) {
-  return `<button class="ctrl" data-zc="${key}">
+function ctrlButton(key, icon, label, extraClass = '') {
+  return `<button class="ctrl${extraClass ? ' ' + extraClass : ''}" data-zc="${key}">
     <div class="ctrl-ic">${icon}</div><span class="ctrl-label">${label}</span>
   </button>`;
 }
@@ -158,7 +158,7 @@ function buildShell(meetingNumber) {
       ${ctrlButton('cam', '📷', 'Video')}
       ${ctrlButton('people', '👥', 'People')}
       ${ctrlButton('native', '🎛', 'Zoom UI')}
-      ${ctrlButton('leave', '📞', 'Leave').replace('class="ctrl"', 'class="ctrl danger"')}
+      ${ctrlButton('leave', '📞', 'Leave', 'danger')}
     </div>`;
   return host;
 }
@@ -301,7 +301,12 @@ function startShellLoop() {
 function wireSdkEvents(client) {
   const on = firstMethod(client, ['on']);
   if (!on) return;
-  const safe = (ev, cb) => { try { on(ev, cb); } catch { /* event not in this build */ } };
+  // createClient() is a singleton in real SDK builds, so every listener we
+  // register must be unregistered on leave or handlers stack across rejoins.
+  const safe = (ev, cb) => {
+    try { on(ev, cb); if (active) active.listeners.push([ev, cb]); }
+    catch { /* event not in this build */ }
+  };
   safe('connection-change', (p) => {
     const state = p && (p.state || p.status);
     if (state === 'Closed' || state === 'Fail' || state === 'Ended') {
@@ -316,13 +321,30 @@ function wireSdkEvents(client) {
 
 export function leaveZoom() {
   if (!active) return;
-  const { client, host, timer } = active;
+  const { client, host, timer, listeners, onResize } = active;
   active = null;
   clearInterval(timer);
+  if (onResize) {
+    window.removeEventListener('resize', onResize);
+    window.removeEventListener('orientationchange', onResize);
+  }
+  // createClient() returns a singleton in real SDK builds, so listeners must
+  // be detached and the client destroyed here — otherwise the next join
+  // stacks duplicate handlers and init() can refuse to run again.
+  const off = firstMethod(client, ['off']);
+  if (off) for (const [ev, cb] of listeners) { try { off(ev, cb); } catch (_) {} }
+  let left;
   try {
-    if (typeof client.leaveMeeting === 'function') client.leaveMeeting();
-    else if (typeof client.leave === 'function') client.leave();
+    if (typeof client.leaveMeeting === 'function') left = client.leaveMeeting();
+    else if (typeof client.leave === 'function') left = client.leave();
   } catch (_) {}
+  Promise.resolve(left).catch(() => {}).then(() => {
+    try {
+      if (window.ZoomMtgEmbedded && typeof window.ZoomMtgEmbedded.destroyClient === 'function') {
+        window.ZoomMtgEmbedded.destroyClient();
+      }
+    } catch (_) {}
+  });
   host.remove();
 }
 
@@ -332,6 +354,8 @@ export function leaveZoom() {
  * SDK's join error (bad passcode, invalid signature, not started, …).
  */
 export async function joinZoomMeeting({ meetingNumber, passcode = '', userName = 'Guest' }) {
+  if (active) leaveZoom(); // never stack two shells / two SDK sessions
+
   const cfg = await getZoomConfig();
   if (!cfg.enabled) throw new Error('zoom-not-configured');
 
@@ -351,12 +375,14 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
   wireShell(host);
 
   const client = window.ZoomMtgEmbedded.createClient();
-  active = { client, host, timer: null, t0: 0, micMuted: false, camOn: false };
+  active = { client, host, timer: null, t0: 0, micMuted: false, camOn: false, listeners: [], onResize: null };
 
   // Size Zoom's video panel to fill the Halo stage.
-  const stageRect = root.getBoundingClientRect();
-  const vw = Math.max(320, Math.floor(stageRect.width));
-  const vh = Math.max(240, Math.floor(stageRect.height));
+  const stageSize = () => {
+    const r = root.getBoundingClientRect();
+    return { width: Math.max(320, Math.floor(r.width)), height: Math.max(240, Math.floor(r.height)) };
+  };
+  const { width: vw, height: vh } = stageSize();
 
   try {
     await client.init({
@@ -395,6 +421,23 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
   wireSdkEvents(client);
   startShellLoop();
   paintControls();
+
+  // Keep Zoom's video panel matched to the stage across rotation/resize
+  // (viewSizes is only read at init; updateVideoOptions re-renders it).
+  let resizeT = 0;
+  const onResize = () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+      if (!active || active.client !== client) return;
+      const fn = firstMethod(client, ['updateVideoOptions']);
+      if (!fn) return;
+      const size = stageSize();
+      try { fn({ viewSizes: { default: size, ribbon: size } }); } catch (_) {}
+    }, 250);
+  };
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
+  active.onResize = onResize;
 
   return { leave: leaveZoom };
 }

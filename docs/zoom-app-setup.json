@@ -35,7 +35,7 @@
 
     "activation": {
       "state_required": "Activated, or your own Zoom account added under Local Test / Add Test Users",
-      "_why": "Marketplace apps sit in a draft state after creation. A draft app rejects joins."
+      "_why": "Marketplace apps sit in a draft state after creation. A draft app rejects joins from anyone who has not been added as a test user — adding yourself under Local Test lets you join before the app is activated."
     }
   },
 
