@@ -120,12 +120,24 @@ function normalizeZoomError(value) {
   return error;
 }
 
-/* The Meeting SDK sometimes reports join failures as plain objects through
-   window error/rejection events rather than the promise returned by join().
-   This guard is armed only while a join is in flight, so such a failure
-   becomes an in-app message instead of an uncaught error that can blank an
-   embedded preview. It is deliberately broad for the few hundred ms a join
-   takes; dispose() puts normal error handling back. */
+/** Zoom rejects with {type, reason, errorCode} rather than an Error, so a
+    rejection is only treated as Zoom's when it carries that shape or a stack
+    pointing at Zoom's bundle. Everything else belongs to the rest of the app
+    and must keep surfacing normally. */
+function looksLikeZoomRejection(reason) {
+  if (!reason || typeof reason !== 'object') return false;
+  if (reason.errorCode !== undefined) return true;
+  if (reason.type !== undefined && reason.reason !== undefined) return true;
+  return typeof reason.stack === 'string' && reason.stack.includes('source.zoom.us');
+}
+
+/* The Meeting SDK sometimes reports join failures through window
+   error/rejection events rather than the promise returned by join(). This
+   guard is armed only while a join is in flight, so such a failure becomes an
+   in-app message instead of an uncaught error that can blank an embedded
+   preview. It only ever claims events it can attribute to Zoom: swallowing
+   another feature's rejection would hide it from the console AND abort an
+   otherwise valid join. dispose() puts normal error handling back. */
 function createJoinErrorGuard() {
   let captured = null;
   const remember = (value) => { if (!captured) captured = normalizeZoomError(value); };
@@ -135,7 +147,11 @@ function createJoinErrorGuard() {
     remember(event.error || event.message);
     event.preventDefault();
   };
-  const onRejection = (event) => { remember(event.reason); event.preventDefault(); };
+  const onRejection = (event) => {
+    if (!looksLikeZoomRejection(event.reason)) return; // not ours — let it through
+    remember(event.reason);
+    event.preventDefault();
+  };
   window.addEventListener('error', onError, true);
   window.addEventListener('unhandledrejection', onRejection);
   return {
