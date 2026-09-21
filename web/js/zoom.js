@@ -31,7 +31,7 @@ import { toast, haptic, openSheet, escapeHtml } from './ui.js';
 // that has been withdrawn 404s at the CDN — which would present as a dead
 // "Join" button. Rather than bet on one version, try a list newest-first and
 // use whichever actually loads. Override with window.HALO_ZOOM_SDK_VERSION.
-const SDK_VERSIONS = ['4.0.0', '3.13.2', '3.11.0', '3.9.0', '3.8.10'];
+const SDK_VERSIONS = ['5.1.4', '4.0.0', '3.13.2', '3.11.0', '3.9.0', '3.8.10'];
 
 let sdkPromise = null;
 let active = null; // { client, host, timer, t0, micMuted, camOn }
@@ -47,6 +47,19 @@ function loadScript(src) {
   });
 }
 
+/** Load Zoom's bundled React/ReactDOM globals, ignoring any that 404. */
+async function preloadVendors(version) {
+  const vendors = [
+    ['React', 'react.min.js'],
+    ['ReactDOM', 'react-dom.min.js'],
+  ];
+  for (const [global, file] of vendors) {
+    if (window[global]) continue;
+    try { await loadScript(`https://source.zoom.us/${version}/lib/vendor/${file}`); }
+    catch (_) { /* build bundles its own copy — not fatal */ }
+  }
+}
+
 async function loadSdk(preferred) {
   if (window.ZoomMtgEmbedded) return;
   if (sdkPromise) return sdkPromise;
@@ -56,11 +69,16 @@ async function loadSdk(preferred) {
     const tried = [];
     for (const v of candidates) {
       try {
+        // Several CDN builds of the component view expect React/ReactDOM as
+        // globals and throw "React is not defined" at import time otherwise.
+        // Best-effort: a build that bundles its own deps has no vendor files
+        // to fetch, and failing that 404 must not disqualify a working SDK.
+        await preloadVendors(v);
         await loadScript(`https://source.zoom.us/${v}/zoom-meeting-embedded-${v}.min.js`);
         if (window.ZoomMtgEmbedded) { loadedVersion = v; return; }
         tried.push(`${v} (loaded but no global)`);
-      } catch {
-        tried.push(v);
+      } catch (err) {
+        tried.push(`${v} (${zoomErrorMessage(err) || 'load failed'})`);
       }
     }
     sdkPromise = null;
@@ -79,6 +97,54 @@ export async function getZoomConfig() {
   } catch {
     return { enabled: false };
   }
+}
+
+function zoomErrorMessage(value) {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const detail = value.reason || value.message || value.errorMessage || value.description;
+  const code = value.errorCode || value.code || value.type;
+  if (detail && code) return `${detail} [${code}]`;
+  return detail || (code ? `Zoom error [${code}]` : '');
+}
+
+function normalizeZoomError(value) {
+  if (value instanceof Error && value.message) return value;
+  const detail = zoomErrorMessage(value)
+    || 'Zoom could not start this meeting. Check the meeting ID, passcode, and Zoom app authorization.';
+  const error = new Error(detail);
+  if (value && typeof value === 'object') {
+    error.errorCode = value.errorCode || value.code;
+    error.raw = value;
+  }
+  return error;
+}
+
+/* The Meeting SDK sometimes reports join failures as plain objects through
+   window error/rejection events rather than the promise returned by join().
+   This guard is armed only while a join is in flight, so such a failure
+   becomes an in-app message instead of an uncaught error that can blank an
+   embedded preview. It is deliberately broad for the few hundred ms a join
+   takes; dispose() puts normal error handling back. */
+function createJoinErrorGuard() {
+  let captured = null;
+  const remember = (value) => { if (!captured) captured = normalizeZoomError(value); };
+  const fromZoomScript = (event) => String((event && event.filename) || '').includes('source.zoom.us');
+  const onError = (event) => {
+    if (!fromZoomScript(event)) return;
+    remember(event.error || event.message);
+    event.preventDefault();
+  };
+  const onRejection = (event) => { remember(event.reason); event.preventDefault(); };
+  window.addEventListener('error', onError, true);
+  window.addEventListener('unhandledrejection', onRejection);
+  return {
+    throwIfCaptured() { if (captured) throw captured; },
+    dispose() {
+      window.removeEventListener('error', onError, true);
+      window.removeEventListener('unhandledrejection', onRejection);
+    },
+  };
 }
 
 /* ---------- defensive SDK access ----------
@@ -359,32 +425,38 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
   const cfg = await getZoomConfig();
   if (!cfg.enabled) throw new Error('zoom-not-configured');
 
-  await loadSdk(window.HALO_ZOOM_SDK_VERSION || cfg.sdkVersion || null);
+  const mn = String(meetingNumber || '').replace(/\D/g, '');
+  if (!/^\d{9,11}$/.test(mn)) throw new Error('Enter a valid 9-11 digit Zoom meeting ID.');
 
-  const res = await fetch('/zoom-signature', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ meetingNumber, role: 0 }),
-  });
-  if (!res.ok) throw new Error(`signature-failed (${res.status})`);
-  const { signature, sdkKey } = await res.json();
-
-  const host = buildShell(meetingNumber);
-  document.body.appendChild(host);
-  const root = host.querySelector('.zoom-root');
-  wireShell(host);
-
-  const client = window.ZoomMtgEmbedded.createClient();
-  active = { client, host, timer: null, t0: 0, micMuted: false, camOn: false, listeners: [], onResize: null };
-
-  // Size Zoom's video panel to fill the Halo stage.
-  const stageSize = () => {
-    const r = root.getBoundingClientRect();
-    return { width: Math.max(320, Math.floor(r.width)), height: Math.max(240, Math.floor(r.height)) };
-  };
-  const { width: vw, height: vh } = stageSize();
-
+  const guard = createJoinErrorGuard();
   try {
+    await loadSdk(window.HALO_ZOOM_SDK_VERSION || cfg.sdkVersion || null);
+    guard.throwIfCaptured();
+
+    const res = await fetch('/zoom-signature', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingNumber: mn, role: 0 }),
+    });
+    if (!res.ok) throw new Error(`signature-failed (${res.status})`);
+    const { signature, sdkKey } = await res.json();
+    if (!signature || !sdkKey) throw new Error('The server returned an incomplete Zoom signature.');
+
+    const host = buildShell(mn);
+    document.body.appendChild(host);
+    const root = host.querySelector('.zoom-root');
+    wireShell(host);
+
+    const client = window.ZoomMtgEmbedded.createClient();
+    active = { client, host, timer: null, t0: 0, micMuted: false, camOn: false, listeners: [], onResize: null };
+
+    // Size Zoom's video panel to fill the Halo stage.
+    const stageSize = () => {
+      const r = root.getBoundingClientRect();
+      return { width: Math.max(320, Math.floor(r.width)), height: Math.max(240, Math.floor(r.height)) };
+    };
+    const { width: vw, height: vh } = stageSize();
+
     await client.init({
       zoomAppRoot: root,
       language: 'en-US',
@@ -399,45 +471,48 @@ export async function joinZoomMeeting({ meetingNumber, passcode = '', userName =
         meetingInfo: ['topic', 'host', 'participant'],
       },
     });
+    guard.throwIfCaptured();
+
     await client.join({
       sdkKey,
       signature,
-      meetingNumber: String(meetingNumber),
+      meetingNumber: mn,
       password: passcode,
       userName,
     });
+    // Let queued browser error events from the SDK run before declaring the
+    // join successful; join() can resolve just before one lands.
+    await new Promise(r => setTimeout(r, 0));
+    guard.throwIfCaptured();
+
+    wireSdkEvents(client);
+    startShellLoop();
+    paintControls();
+
+    // Keep Zoom's video panel matched to the stage across rotation/resize
+    // (viewSizes is only read at init; updateVideoOptions re-renders it).
+    let resizeT = 0;
+    const onResize = () => {
+      clearTimeout(resizeT);
+      resizeT = setTimeout(() => {
+        if (!active || active.client !== client) return;
+        const fn = firstMethod(client, ['updateVideoOptions']);
+        if (!fn) return;
+        const size = stageSize();
+        try { fn({ viewSizes: { default: size, ribbon: size } }); } catch (_) {}
+      }, 250);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    active.onResize = onResize;
   } catch (err) {
+    // Tear the shell down so a failed join never leaves a dead black screen,
+    // and surface Zoom's own reason/errorCode rather than "unknown error".
     leaveZoom();
-    // Zoom rejects with {type, reason, errorCode}; keep those so the UI can
-    // show what actually went wrong instead of a generic failure.
-    const detail = err && (err.reason || err.message) ? (err.reason || err.message) : 'unknown error';
-    const code = err && err.errorCode ? ` [${err.errorCode}]` : '';
-    const wrapped = new Error(`${detail}${code}`);
-    wrapped.errorCode = err && err.errorCode;
-    wrapped.raw = err;
-    throw wrapped;
+    throw normalizeZoomError(err);
+  } finally {
+    guard.dispose();
   }
-
-  wireSdkEvents(client);
-  startShellLoop();
-  paintControls();
-
-  // Keep Zoom's video panel matched to the stage across rotation/resize
-  // (viewSizes is only read at init; updateVideoOptions re-renders it).
-  let resizeT = 0;
-  const onResize = () => {
-    clearTimeout(resizeT);
-    resizeT = setTimeout(() => {
-      if (!active || active.client !== client) return;
-      const fn = firstMethod(client, ['updateVideoOptions']);
-      if (!fn) return;
-      const size = stageSize();
-      try { fn({ viewSizes: { default: size, ribbon: size } }); } catch (_) {}
-    }, 250);
-  };
-  window.addEventListener('resize', onResize);
-  window.addEventListener('orientationchange', onResize);
-  active.onResize = onResize;
 
   return { leave: leaveZoom };
 }

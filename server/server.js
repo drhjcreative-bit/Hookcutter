@@ -125,7 +125,9 @@ function handleApi(req, res) {
       try {
         const { meetingNumber, role } = JSON.parse(body || '{}');
         const mn = String(meetingNumber || '').replace(/\D/g, '');
-        if (!mn) { res.writeHead(400); res.end('meetingNumber required'); return; }
+        if (!/^\d{9,11}$/.test(mn)) {
+          res.writeHead(400); res.end('valid meetingNumber required'); return;
+        }
         const signature = zoomSignature(mn, role === 1 ? 1 : 0);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ signature, sdkKey: ZOOM_SDK_KEY }));
@@ -155,9 +157,13 @@ const server = http.createServer((req, res) => {
       }
     }
     const ext = path.extname(filePath).toLowerCase();
+    // These files are referenced with stable names rather than content hashes.
+    // Do not let a browser keep an older app.js/zoom.js after a deploy or
+    // workflow restart, or a fixed runtime error can appear to persist.
+    const shouldRevalidate = ['.html', '.js', '.mjs', '.css', '.webmanifest'].includes(ext);
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+      'Cache-Control': shouldRevalidate ? 'no-cache' : 'public, max-age=3600',
     });
     fs.createReadStream(filePath).pipe(res);
   });
