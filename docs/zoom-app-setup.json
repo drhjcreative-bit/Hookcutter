@@ -17,7 +17,7 @@
     },
 
     "app_credentials": {
-      "client_id": "NetTln8zSWLjzeWQaEgpA",
+      "client_id": "N_dji6qaSwGW2910N3cWQ",
       "client_secret": "<KEEP OUT OF GIT — paste only into the server's env>",
       "_maps_to_env": {
         "client_id": "ZOOM_SDK_KEY",
